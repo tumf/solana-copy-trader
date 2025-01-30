@@ -1,32 +1,13 @@
 from decimal import Decimal
 from typing import Dict, List
+from pydantic import BaseModel, Field, ConfigDict
 from portfolio import Portfolio
 from token_price_resolver import TokenPriceResolver
 from logger import logger
 from network import USDC_MINT, SOL_MINT
-from models import Trade, SwapTrade
+from models import Trade, SwapTrade, RiskConfig
 
 logger = logger.bind(name="trade_planner")
-
-
-class RiskConfig:
-    def __init__(
-        self,
-        max_trade_size_usd: Decimal,
-        min_trade_size_usd: Decimal,
-        max_slippage_bps: int,
-        max_portfolio_allocation: Decimal,
-        gas_buffer_sol: Decimal,
-        weight_tolerance: Decimal,
-        min_weight_threshold: Decimal,
-    ):
-        self.max_trade_size_usd = max_trade_size_usd
-        self.min_trade_size_usd = min_trade_size_usd
-        self.max_slippage_bps = max_slippage_bps
-        self.max_portfolio_allocation = max_portfolio_allocation
-        self.gas_buffer_sol = gas_buffer_sol
-        self.weight_tolerance = weight_tolerance
-        self.min_weight_threshold = min_weight_threshold
 
 
 class TradePlanner:

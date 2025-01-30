@@ -19,6 +19,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "sqlalchemy>=2.0.37",
     "alembic>=1.14.1",
+    "pydantic>=2.10.6",
 ]
 requires-python = ">=3.12"
 readme = "README.md"
