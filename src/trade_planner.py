@@ -45,7 +45,7 @@ class TradePlanner:
         self, current_portfolio: Portfolio, target_portfolio: Portfolio
     ) -> List[Dict]:
         """Create trade plan to match target portfolio with risk management and tolerance"""
-        trades = []
+        unoptimized_trades = []  # 最適化前の取引リスト
 
         # 現在と目標の総資産価値を取得
         current_total = Decimal(str(current_portfolio.total_value_usd))
@@ -101,7 +101,7 @@ class TradePlanner:
                     and current.usd_value > self.risk_config.min_trade_size_usd
                 ):
                     # 保有していて、目標が最小閾値未満なら売却
-                    trades.append(
+                    unoptimized_trades.append(
                         {
                             "type": "sell",
                             "symbol": symbol,
@@ -159,7 +159,7 @@ class TradePlanner:
                     batch_value / price if price > 0 else Decimal(0)
                 )  # USDをトークン数に変換
 
-                trades.append(
+                unoptimized_trades.append(
                     {
                         "type": trade_type,
                         "symbol": symbol,
@@ -171,4 +171,57 @@ class TradePlanner:
 
                 remaining_value -= batch_value  # 残りの取引価値を減少
 
-        return trades
+        # 取引を最適化
+        return self._optimize_trades(unoptimized_trades)
+
+    def _optimize_trades(self, trades: List[Dict]) -> List[Dict]:
+        """取引を最適化して合成する"""
+        if not trades:
+            return []
+
+        # 売り注文と買い注文を分離
+        sell_trades = [t for t in trades if t["type"] == "sell"]
+        buy_trades = [t for t in trades if t["type"] == "buy"]
+
+        optimized_trades = []
+        sell_index = 0
+        buy_index = 0
+
+        while sell_index < len(sell_trades) and buy_index < len(buy_trades):
+            sell_trade = sell_trades[sell_index]
+            buy_trade = buy_trades[buy_index]
+
+            # 取引価値の小さい方を基準に合成
+            trade_value = min(sell_trade["usd_value"], buy_trade["usd_value"])
+
+            # 合成取引を作成
+            optimized_trades.append({
+                "type": "swap",
+                "from_symbol": sell_trade["symbol"],
+                "from_mint": sell_trade["mint"],
+                "from_amount": (trade_value / sell_trade["usd_value"]) * sell_trade["amount"],
+                "to_symbol": buy_trade["symbol"],
+                "to_mint": buy_trade["mint"],
+                "to_amount": (trade_value / buy_trade["usd_value"]) * buy_trade["amount"],
+                "usd_value": trade_value,
+            })
+
+            # 残りの取引価値を更新
+            sell_trade["usd_value"] -= trade_value
+            buy_trade["usd_value"] -= trade_value
+            sell_trade["amount"] = (sell_trade["usd_value"] / trade_value) * sell_trade["amount"] if trade_value > 0 else Decimal(0)
+            buy_trade["amount"] = (buy_trade["usd_value"] / trade_value) * buy_trade["amount"] if trade_value > 0 else Decimal(0)
+
+            # 完了した取引を次に進める
+            if sell_trade["usd_value"] < self.risk_config.min_trade_size_usd:
+                sell_index += 1
+            if buy_trade["usd_value"] < self.risk_config.min_trade_size_usd:
+                buy_index += 1
+
+        # 残りの取引を追加
+        remaining_trades = []
+        remaining_trades.extend(sell_trades[sell_index:])
+        remaining_trades.extend(buy_trades[buy_index:])
+        optimized_trades.extend([t for t in remaining_trades if t["usd_value"] >= self.risk_config.min_trade_size_usd])
+
+        return optimized_trades

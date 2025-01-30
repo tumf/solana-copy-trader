@@ -245,9 +245,17 @@ async def main():
         trades = await agent.create_trade_plan(current_portfolio, target_portfolio)
         logger.info(f"Generated {len(trades)} trades")
         for trade in trades:
-            logger.info(
-                f"- {trade['type']:4} {trade['symbol']:12} {trade['amount']:10,.6f} (${trade['usd_value']:12,.2f})"
-            )
+            if trade["type"] == "swap":
+                logger.info(
+                    f"- swap {trade['from_symbol']:12} -> {trade['to_symbol']:12} "
+                    f"{trade['from_amount']:10,.6f} -> {trade['to_amount']:10,.6f} "
+                    f"(${trade['usd_value']:12,.2f})"
+                )
+            else:
+                logger.info(
+                    f"- {trade['type']:4} {trade['symbol']:12} {trade['amount']:10,.6f} "
+                    f"(${trade['usd_value']:12,.2f})"
+                )
 
         # Execute trades only if private key is set
         if trades and agent.wallet_private_key:
