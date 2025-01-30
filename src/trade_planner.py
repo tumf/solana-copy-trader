@@ -128,6 +128,13 @@ class TradePlanner:
             else:
                 # 売り注文：現在の重みと目標の重みの差に基づいて計算
                 trade_value = current_total * (current_weight - target_weight)
+                # 売却後の残高が最小取引サイズを下回る場合は全て売却
+                remaining_value = current.usd_value - trade_value if current else Decimal(0)
+                if Decimal("0") < remaining_value < self.risk_config.min_trade_size_usd:
+                    logger.debug(
+                        f"Remaining balance would be too small (${remaining_value:,.2f}), selling entire position for {symbol}"
+                    )
+                    trade_value = current.usd_value
                 trade_type = "sell"
 
             # 最小取引サイズチェック
