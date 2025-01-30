@@ -96,7 +96,10 @@ class TradePlanner:
 
             # 最小重み閾値チェック
             if target_weight < self.risk_config.min_weight_threshold:
-                if current_weight > 0 and current.usd_value > Decimal("1"):
+                if (
+                    current_weight > 0
+                    and current.usd_value > self.risk_config.min_trade_size_usd
+                ):
                     # 保有していて、目標が最小閾値未満なら売却
                     trades.append(
                         {
@@ -128,19 +131,16 @@ class TradePlanner:
                 trade_type = "sell"
 
             # 最小取引サイズチェック
-            if (
-                trade_value < self.risk_config.min_trade_size_usd
-                or trade_value < Decimal("1")
-            ):
+            if trade_value < self.risk_config.min_trade_size_usd:
                 logger.debug(
-                    f"Skipping small trade for {symbol} {mint}: ${trade_value:,.2f} < ${max(self.risk_config.min_trade_size_usd, Decimal('1')):,.2f}"
+                    f"Skipping small trade for {symbol} {mint}: ${trade_value:,.2f} < ${self.risk_config.min_trade_size_usd:,.2f}"
                 )
                 continue
 
-            # $1未満の残高は無視
-            if current and current.usd_value < Decimal("1"):
+            # 最小取引サイズ未満の残高は無視
+            if current and current.usd_value < self.risk_config.min_trade_size_usd:
                 logger.debug(
-                    f"Skipping dust balance for {symbol} {mint}: ${current.usd_value:,.2f} < $1.00"
+                    f"Skipping dust balance for {symbol} {mint}: ${current.usd_value:,.2f} < ${self.risk_config.min_trade_size_usd:,.2f}"
                 )
                 continue
 
@@ -148,10 +148,10 @@ class TradePlanner:
             remaining_value = trade_value
             while remaining_value > 0:
                 batch_value = min(remaining_value, self.risk_config.max_trade_size_usd)
-                # $1未満のバッチは無視
-                if batch_value < Decimal("1"):
+                # 最小取引サイズ未満のバッチは無視
+                if batch_value < self.risk_config.min_trade_size_usd:
                     logger.debug(
-                        f"Skipping dust batch for {symbol} {mint}: ${batch_value:,.2f} < $1.00"
+                        f"Skipping dust batch for {symbol} {mint}: ${batch_value:,.2f} < ${self.risk_config.min_trade_size_usd:,.2f}"
                     )
                     break
 
