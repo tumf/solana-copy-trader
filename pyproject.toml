@@ -1,0 +1,90 @@
+[project]
+name = "solana-copy-trader"
+version = "0.1.0"
+description = "Solana Copy Trader"
+authors = [
+    {name = "tumf", email = "tumf@users.noreply.github.com"},
+]
+dependencies = [
+    "solana>=0.36.3",
+    "base58>=2.1.1",
+    "python-dotenv>=1.0.1",
+    "requests>=2.32.3",
+    "loguru>=0.7.3",
+    "anyio>=4.3.0",
+    "mnemonic>=0.21",
+    "solders>=0.23.0",
+    "web3>=7.7.0",
+    "aiohttp>=3.11.11",
+    "pyyaml>=6.0.2",
+    "sqlalchemy>=2.0.37",
+    "alembic>=1.14.1",
+]
+requires-python = ">=3.12"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.10.0",
+    "isort>=6.0.0",
+    "mypy>=1.14.1",
+    "pre-commit>=4.1.0",
+    "pytest>=8.3.4",
+    "pytest-env>=1.1.5",
+    "pytest-mock>=3.14.0",
+    "pytest-asyncio>=0.25.3",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.9.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.uv.sources]
+solana = { git = "https://github.com/michaelhly/solana-py.git" }
+
+[tool.pytest.ini_options]
+pythonpath = [
+    ".",
+]
+markers = [
+    "asyncio: mark test as async",
+]
+asyncio_mode = "auto"
+
+[tool.pytest-asyncio]
+mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.pytest]
+addopts = "--asyncio-mode=auto"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+    "raise ImportError",
+]
+ignore_errors = true
+omit = [
+    "tests/*",
+    "setup.py",
+]
+
