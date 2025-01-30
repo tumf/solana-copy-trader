@@ -2,13 +2,14 @@ import asyncio
 from decimal import Decimal
 from typing import Dict, List, Optional
 from solana.rpc.async_api import AsyncClient
+from solders.pubkey import Pubkey  # type: ignore
 from dex import DEX, JupiterDEX, MeteoraSwap, OrcaDEX, RaydiumDEX, SwapQuote, SwapResult
 from jupiter import JupiterClient
 from logger import logger
+from network import USDC_MINT
+from models import Trade, SwapTrade
 
 logger = logger.bind(name="trade_executer")
-
-USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
 
 class TradeExecuter:
@@ -74,14 +75,18 @@ class TradeExecuter:
         return max(quotes, key=lambda q: q.expected_output_amount)
 
     async def execute_swap_with_retry(
-        self, quote: SwapQuote, wallet_address: str, wallet_private_key: str, max_retries: int = 3
+        self,
+        quote: SwapQuote,
+        wallet_address: str,
+        wallet_private_key: str,
+        max_retries: int = 3,
     ) -> SwapResult:
         """Execute swap with retry logic"""
         for dex in self.dexes:
             if dex.name == quote.dex_name:
                 for attempt in range(max_retries):
                     result = await dex.execute_swap(
-                        quote, wallet_address, wallet_private_key
+                        quote, Pubkey.from_string(wallet_address), wallet_private_key
                     )
                     if result.success:
                         return result
@@ -111,52 +116,54 @@ class TradeExecuter:
 
         return Decimal(0)  # Return 0 if price not available
 
-    async def execute_trades(self, trades: List[dict], wallet_address: str, wallet_private_key: str):
+    async def execute_trades(
+        self, trades: List[SwapTrade], wallet_address: str, wallet_private_key: str
+    ):
         """Execute trades using the best available DEX"""
         for trade in trades:
             try:
-                mint = trade["mint"]
-                usd_value = trade["usd_value"]
-
-                if trade["type"] == "buy":
-                    # Buy token using USDC
-                    usdc_amount = int(
-                        usd_value * Decimal("1000000")
-                    )  # USDC has 6 decimals
-                    quote = await self.get_best_quote(USDC_MINT, mint, usdc_amount)
-                    if quote:
-                        result = await self.execute_swap_with_retry(quote, wallet_address, wallet_private_key)
-                        if result.success:
-                            logger.info(
-                                f"Bought {mint} for {usd_value} USDC using {quote.dex_name}: {result.tx_signature}"
-                            )
-                        else:
-                            logger.error(
-                                f"Failed to buy {mint}: {result.error_message}"
-                            )
+                token_amount = int(trade.from_amount)
+                quote = await self.get_best_quote(trade.from_mint, trade.to_mint, token_amount)
+                if quote:
+                    result = await self.execute_swap_with_retry(
+                        quote, wallet_address, wallet_private_key
+                    )
+                    if result.success:
+                        logger.info(
+                            f"Swapped {trade.from_symbol} for {trade.to_symbol} (${trade.usd_value}) using {quote.dex_name}: {result.tx_signature}"
+                        )
                     else:
-                        logger.error(f"No quotes available for buying {mint}")
-
+                        logger.error(
+                            f"Failed to swap {trade.from_symbol} to {trade.to_symbol}: {result.error_message}"
+                        )
                 else:
-                    # Sell token to USDC
-                    token_price = await self.get_token_price(mint)
-                    token_amount = int(usd_value / token_price)
-                    quote = await self.get_best_quote(mint, USDC_MINT, token_amount)
-                    if quote:
-                        result = await self.execute_swap_with_retry(quote, wallet_address, wallet_private_key)
-                        if result.success:
-                            logger.info(
-                                f"Sold {mint} for {usd_value} USDC using {quote.dex_name}: {result.tx_signature}"
-                            )
-                        else:
-                            logger.error(
-                                f"Failed to sell {mint}: {result.error_message}"
-                            )
-                    else:
-                        logger.error(f"No quotes available for selling {mint}")
+                    logger.error(f"No quotes available for swapping {trade.from_symbol} to {trade.to_symbol}")
 
                 # Wait between trades to avoid rate limits
                 await asyncio.sleep(1)
 
             except Exception as e:
-                logger.error(f"Failed to execute trade for {mint}: {e}") 
+                logger.error(f"Failed to execute trade: {e}")
+
+
+async def main():
+    trade_executer = TradeExecuter(rpc_url="https://api.mainnet-beta.solana.com")
+    await trade_executer.initialize()
+    trades = [
+        SwapTrade(
+            type="swap",
+            from_symbol="USDC",
+            from_mint=USDC_MINT,
+            from_amount=Decimal("100"),
+            to_symbol="SOL",
+            to_mint="So11111111111111111111111111111111111111112",
+            to_amount=Decimal("0.1"),
+            usd_value=Decimal("100"),
+        ),
+    ]
+    await trade_executer.execute_trades(trades, wallet_address, wallet_private_key)
+    await trade_executer.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

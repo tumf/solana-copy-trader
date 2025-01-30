@@ -14,6 +14,7 @@ from trade_planner import TradePlanner, RiskConfig
 from trade_executer import TradeExecuter
 from logger import logger
 from network import USDC_MINT, TOKEN_PROGRAM_ID
+from models import Trade, SwapTrade
 
 logger = logger.bind(name="copy_agent")
 
@@ -178,7 +179,7 @@ class CopyTradeAgent:
 
     async def create_trade_plan(
         self, current_portfolio: Portfolio, target_portfolio: Portfolio
-    ):
+    ) -> List[Trade]:
         """Create trade plan to match target portfolio with risk management and tolerance"""
         return await self.trade_planner.create_trade_plan(
             current_portfolio, target_portfolio
@@ -194,7 +195,7 @@ class CopyTradeAgent:
             Decimal(sol_balance.value) / Decimal(1e9) >= self.risk_config.gas_buffer_sol
         )
 
-    async def execute_trades(self, trades: List[dict]):
+    async def execute_trades(self, trades: List[Trade]):
         """Execute trades using the best available DEX"""
         if not self.wallet_address or not self.wallet_private_key:
             raise ValueError(
@@ -211,8 +212,10 @@ async def main():
     agent = CopyTradeAgent("https://api.mainnet-beta.solana.com")
 
     # Set wallet from environment variables
+    has_private_key = False
     if private_key := os.getenv("WALLET_PRIVATE_KEY"):
         agent.set_wallet_private_key(private_key)
+        has_private_key = True
     elif wallet_address := os.getenv("WALLET_ADDRESS"):
         agent.set_wallet_address(wallet_address)
     else:
@@ -225,9 +228,7 @@ async def main():
         # Get current portfolio
         logger.info("Getting current portfolio...")
         current_portfolio = await agent.get_wallet_portfolio(agent.wallet_address)
-        logger.info(
-            f"Current portfolio value: ${current_portfolio.total_value_usd:,.2f}"
-        )
+        logger.info(f"Current portfolio value: ${current_portfolio.total_value_usd:,.2f}")
         sorted_balances = sorted(
             current_portfolio.token_balances.values(),
             key=lambda x: float(x.usd_value),
@@ -265,26 +266,19 @@ async def main():
         trades = await agent.create_trade_plan(current_portfolio, target_portfolio)
         logger.info(f"Generated {len(trades)} trades")
         for trade in trades:
-            if trade["type"] == "swap":
+            if trade.type == "swap":
                 logger.info(
-                    f"- swap {trade['from_symbol']:12} -> {trade['to_symbol']:12} "
-                    f"{trade['from_amount']:10,.6f} -> {trade['to_amount']:10,.6f} "
-                    f"(${trade['usd_value']:12,.2f})"
-                )
-            else:
-                logger.info(
-                    f"- {trade['type']:4} {trade['symbol']:12} {trade['amount']:10,.6f} "
-                    f"(${trade['usd_value']:12,.2f})"
+                    f"- swap {trade.from_symbol:12} -> {trade.to_symbol:12} "
+                    f"{trade.from_amount:10,.6f} -> {trade.to_amount:10,.6f} "
+                    f"(${trade.usd_value:12,.2f})"
                 )
 
         # Execute trades only if private key is set
-        if trades and agent.wallet_private_key:
+        if trades and has_private_key:
             logger.info("Executing trades...")
             await agent.execute_trades(trades)
         elif trades:
-            logger.info("Trades planned but not executed (private key not set)")
-        else:
-            logger.info("No trades needed")
+            logger.info("Skipping trade execution because WALLET_PRIVATE_KEY is not set")
 
     except Exception as e:
         logger.error(f"Error in main: {e}")

@@ -4,6 +4,7 @@ from portfolio import Portfolio
 from token_price_resolver import TokenPriceResolver
 from logger import logger
 from network import USDC_MINT, SOL_MINT
+from models import Trade, SwapTrade
 
 logger = logger.bind(name="trade_planner")
 
@@ -46,9 +47,11 @@ class TradePlanner:
 
     async def create_trade_plan(
         self, current_portfolio: Portfolio, target_portfolio: Portfolio
-    ) -> List[Dict]:
+    ) -> List[Trade]:
         """Create trade plan to match target portfolio with risk management and tolerance"""
-        unoptimized_trades = []  # 最適化前の取引リスト
+        # 売りと買いの取引を分けて集計
+        sell_trades = []  # USDCへの売り取引
+        buy_trades = []   # USDCからの買い取引
 
         # 現在と目標の総資産価値を取得
         current_total = Decimal(str(current_portfolio.total_value_usd))
@@ -68,7 +71,7 @@ class TradePlanner:
             if mint == USDC_MINT:
                 continue
             if mint in target_portfolio.token_balances:
-                weight = target_portfolio.token_balances[mint].weight * Decimal(1)
+                weight = Decimal(str(target_portfolio.token_balances[mint].weight))
                 adjusted_target[mint] = weight
                 total_adjusted_weight += weight
 
@@ -94,7 +97,7 @@ class TradePlanner:
             current_weight = Decimal(0)
             if current:
                 current_weight = (
-                    current.usd_value / current_total
+                    Decimal(str(current.usd_value)) / current_total
                     if current_total > 0
                     else Decimal(0)
                 )
@@ -110,13 +113,16 @@ class TradePlanner:
                     current_weight > 0
                     and current.usd_value > self.risk_config.min_trade_size_usd
                 ):
-                    # 保有していて、目標が最小閾値未満なら売却
-                    unoptimized_trades.append(
+                    # 保有していて、目標が最小閾値未満なら売却（USDCへのスワップ）
+                    sell_trades.append(
                         {
-                            "type": "sell",
-                            "symbol": symbol,
-                            "mint": mint,
-                            "amount": current.amount,
+                            "type": "swap",
+                            "from_symbol": symbol,
+                            "from_mint": mint,
+                            "from_amount": current.amount,
+                            "to_symbol": "USDC",
+                            "to_mint": USDC_MINT,
+                            "to_amount": current.usd_value,  # USDCは1:1
                             "usd_value": current.usd_value,
                         }
                     )
@@ -132,183 +138,151 @@ class TradePlanner:
             # トレード価値を計算（現在の総資産価値に基づいて）
             trade_value = Decimal(0)
             if target_weight > current_weight:
-                # 買い注文：目標の重みと現在の重みの差に基づいて計算
+                # 買い注文：USDCからのスワップ
                 trade_value = current_total * (target_weight - current_weight)
-                trade_type = "buy"
-            else:
-                # 売り注文：現在の重みと目標の重みの差に基づいて計算
-                trade_value = current_total * (current_weight - target_weight)
-                # 売却後の残高が最小取引サイズを下回る場合は全て売却
-                remaining_value = (
-                    current.usd_value - trade_value if current else Decimal(0)
-                )
-                if Decimal("0") < remaining_value < self.risk_config.min_trade_size_usd:
-                    logger.debug(
-                        f"Remaining balance would be too small (${remaining_value:,.2f}), selling entire position for {symbol}"
-                    )
-                    trade_value = current.usd_value
-                trade_type = "sell"
-
-            # 最小取引サイズチェック
-            if trade_value < self.risk_config.min_trade_size_usd:
-                logger.debug(
-                    f"Skipping small trade for {symbol} {mint}: ${trade_value:,.2f} < ${self.risk_config.min_trade_size_usd:,.2f}"
-                )
-                continue
-
-            # 最小取引サイズ未満の残高は無視
-            if current and current.usd_value < self.risk_config.min_trade_size_usd:
-                logger.debug(
-                    f"Skipping dust balance for {symbol} {mint}: ${current.usd_value:,.2f} < ${self.risk_config.min_trade_size_usd:,.2f}"
-                )
-                continue
-
-            # 大きな取引を分割
-            remaining_value = trade_value
-            while remaining_value > 0:
-                batch_value = min(remaining_value, self.risk_config.max_trade_size_usd)
-                # 最小取引サイズ未満のバッチは無視
-                if batch_value < self.risk_config.min_trade_size_usd:
-                    logger.debug(
-                        f"Skipping dust batch for {symbol} {mint}: ${batch_value:,.2f} < ${self.risk_config.min_trade_size_usd:,.2f}"
-                    )
-                    break
-
-                batch_amount = (
-                    batch_value / price if price > 0 else Decimal(0)
-                )  # USDをトークン数に変換
-
-                unoptimized_trades.append(
+                batch_amount = trade_value / price if price > 0 else Decimal(0)
+                buy_trades.append(
                     {
-                        "type": trade_type,
-                        "symbol": symbol,
-                        "mint": mint,
-                        "usd_value": batch_value,
-                        "amount": batch_amount,
+                        "type": "swap",
+                        "from_symbol": "USDC",
+                        "from_mint": USDC_MINT,
+                        "from_amount": trade_value,  # USDCは1:1
+                        "to_symbol": symbol,
+                        "to_mint": mint,
+                        "to_amount": batch_amount,
+                        "usd_value": trade_value,
+                    }
+                )
+            else:
+                # 売り注文：USDCへのスワップ
+                trade_value = current_total * (current_weight - target_weight)
+                batch_amount = trade_value / price if price > 0 else Decimal(0)
+                sell_trades.append(
+                    {
+                        "type": "swap",
+                        "from_symbol": symbol,
+                        "from_mint": mint,
+                        "from_amount": batch_amount,
+                        "to_symbol": "USDC",
+                        "to_mint": USDC_MINT,
+                        "to_amount": trade_value,  # USDCは1:1
+                        "usd_value": trade_value,
                     }
                 )
 
-                remaining_value -= batch_value  # 残りの取引価値を減少
+        # 直接のトークン間取引を作成
+        direct_trades = []
+        remaining_sells = []
+        remaining_buys = []
 
-        # 取引を最適化
-        return self._optimize_trades(unoptimized_trades)
+        # 売り取引と買い取引をマッチング
+        for sell in sell_trades:
+            matched = False
+            for buy in buy_trades:
+                if not buy.get("matched"):
+                    # 取引サイズの小さい方を基準に取引を作成
+                    match_value = min(sell["usd_value"], buy["usd_value"])
+                    if match_value >= self.risk_config.min_trade_size_usd:
+                        sell_ratio = match_value / sell["usd_value"]
+                        buy_ratio = match_value / buy["usd_value"]
+                        
+                        direct_trades.append({
+                            "type": "swap",
+                            "from_symbol": sell["from_symbol"],
+                            "from_mint": sell["from_mint"],
+                            "from_amount": sell["from_amount"] * sell_ratio,
+                            "to_symbol": buy["to_symbol"],
+                            "to_mint": buy["to_mint"],
+                            "to_amount": buy["to_amount"] * buy_ratio,
+                            "usd_value": match_value,
+                        })
 
-    def _optimize_trades(self, trades: List[Dict]) -> List[Dict]:
+                        # 残りの取引を更新
+                        if sell["usd_value"] > match_value:
+                            remaining_value = sell["usd_value"] - match_value
+                            remaining_ratio = remaining_value / sell["usd_value"]
+                            remaining_sells.append({
+                                **sell,
+                                "from_amount": sell["from_amount"] * remaining_ratio,
+                                "to_amount": sell["to_amount"] * remaining_ratio,
+                                "usd_value": remaining_value,
+                            })
+                        
+                        if buy["usd_value"] > match_value:
+                            remaining_value = buy["usd_value"] - match_value
+                            remaining_ratio = remaining_value / buy["usd_value"]
+                            remaining_buys.append({
+                                **buy,
+                                "from_amount": buy["from_amount"] * remaining_ratio,
+                                "to_amount": buy["to_amount"] * remaining_ratio,
+                                "usd_value": remaining_value,
+                            })
+                        
+                        buy["matched"] = True
+                        matched = True
+                        break
+            
+            if not matched:
+                remaining_sells.append(sell)
+
+        # マッチしなかった買い取引を追加
+        remaining_buys.extend([buy for buy in buy_trades if not buy.get("matched")])
+
+        # 全ての取引を結合して最適化
+        all_trades = direct_trades + remaining_sells + remaining_buys
+        return self._optimize_trades(all_trades)
+
+    def _optimize_trades(self, trades: List[Dict]) -> List[Trade]:
         """取引を最適化して合成する"""
         if not trades:
             return []
 
-        # 売り注文と買い注文を分離
-        sell_trades = [t for t in trades if t["type"] == "sell"]
-        buy_trades = [t for t in trades if t["type"] == "buy"]
-
         # トークンペアごとに取引を集約
-        pair_trades: Dict[str, Dict] = {}
-        for sell_trade in sell_trades:
-            for buy_trade in buy_trades:
-                pair_key = f"{sell_trade['mint']}->{buy_trade['mint']}"
-                if pair_key not in pair_trades:
-                    pair_trades[pair_key] = {
-                        "type": "swap",
-                        "from_symbol": sell_trade["symbol"],
-                        "from_mint": sell_trade["mint"],
-                        "from_amount": Decimal(0),
-                        "to_symbol": buy_trade["symbol"],
-                        "to_mint": buy_trade["mint"],
-                        "to_amount": Decimal(0),
-                        "usd_value": Decimal(0),
-                    }
+        pair_trades: Dict[str, SwapTrade] = {}
+        for trade in trades:
+            pair_key = f"{trade['from_mint']}->{trade['to_mint']}"
+            if pair_key not in pair_trades:
+                pair_trades[pair_key] = SwapTrade(
+                    type="swap",
+                    from_symbol=trade["from_symbol"],
+                    from_mint=trade["from_mint"],
+                    from_amount=Decimal(0),
+                    to_symbol=trade["to_symbol"],
+                    to_mint=trade["to_mint"],
+                    to_amount=Decimal(0),
+                    usd_value=Decimal(0),
+                )
 
-                # 取引価値の小さい方を基準に合成
-                trade_value = min(sell_trade["usd_value"], buy_trade["usd_value"])
-                if trade_value < self.risk_config.min_trade_size_usd:
-                    continue
-
-                pair_trades[pair_key]["from_amount"] += (
-                    trade_value / sell_trade["usd_value"]
-                ) * sell_trade["amount"]
-                pair_trades[pair_key]["to_amount"] += (
-                    trade_value / buy_trade["usd_value"]
-                ) * buy_trade["amount"]
-                pair_trades[pair_key]["usd_value"] += trade_value
-
-                # 使用した取引価値を減算
-                sell_trade["usd_value"] -= trade_value
-                buy_trade["usd_value"] -= trade_value
-
-        # 残りの売り注文を集約
-        sell_aggregated: Dict[str, Dict] = {}
-        for trade in sell_trades:
-            if trade["usd_value"] < self.risk_config.min_trade_size_usd:
-                continue
-
-            mint = trade["mint"]
-            if mint not in sell_aggregated:
-                sell_aggregated[mint] = {
-                    "type": "sell",
-                    "symbol": trade["symbol"],
-                    "mint": mint,
-                    "amount": Decimal(0),
-                    "usd_value": Decimal(0),
-                }
-            sell_aggregated[mint]["amount"] += trade["amount"]
-            sell_aggregated[mint]["usd_value"] += trade["usd_value"]
+            pair_trades[pair_key].from_amount += trade["from_amount"]
+            pair_trades[pair_key].to_amount += trade["to_amount"]
+            pair_trades[pair_key].usd_value += trade["usd_value"]
 
         # 集約された取引を最大取引サイズで分割
-        optimized_trades = []
+        optimized_trades: List[Trade] = []
 
-        # スワップ取引の分割
         for trade in pair_trades.values():
-            if trade["usd_value"] < self.risk_config.min_trade_size_usd:
+            if trade.usd_value < self.risk_config.min_trade_size_usd:
                 continue
 
-            remaining_value = trade["usd_value"]
+            remaining_value = trade.usd_value
             while remaining_value > 0:
                 batch_value = min(remaining_value, self.risk_config.max_trade_size_usd)
                 if batch_value < self.risk_config.min_trade_size_usd:
                     break
 
-                ratio = batch_value / trade["usd_value"]
+                ratio = batch_value / trade.usd_value
                 optimized_trades.append(
-                    {
-                        "type": "swap",
-                        "from_symbol": trade["from_symbol"],
-                        "from_mint": trade["from_mint"],
-                        "from_amount": trade["from_amount"] * ratio,
-                        "to_symbol": trade["to_symbol"],
-                        "to_mint": trade["to_mint"],
-                        "to_amount": trade["to_amount"] * ratio,
-                        "usd_value": batch_value,
-                    }
+                    SwapTrade(
+                        type="swap",
+                        from_symbol=trade.from_symbol,
+                        from_mint=trade.from_mint,
+                        from_amount=trade.from_amount * ratio,
+                        to_symbol=trade.to_symbol,
+                        to_mint=trade.to_mint,
+                        to_amount=trade.to_amount * ratio,
+                        usd_value=batch_value,
+                    )
                 )
                 remaining_value -= batch_value
-
-        # 売り取引の分割
-        for trade in sell_aggregated.values():
-            remaining_value = trade["usd_value"]
-            while remaining_value > 0:
-                batch_value = min(remaining_value, self.risk_config.max_trade_size_usd)
-                if batch_value < self.risk_config.min_trade_size_usd:
-                    break
-
-                ratio = batch_value / trade["usd_value"]
-                optimized_trades.append(
-                    {
-                        "type": "sell",
-                        "symbol": trade["symbol"],
-                        "mint": trade["mint"],
-                        "amount": trade["amount"] * ratio,
-                        "usd_value": batch_value,
-                    }
-                )
-                remaining_value -= batch_value
-
-        # 残りの買い注文を追加（未使用分）
-        remaining_buys = [
-            t
-            for t in buy_trades
-            if t["usd_value"] >= self.risk_config.min_trade_size_usd
-        ]
-        optimized_trades.extend(remaining_buys)
 
         return optimized_trades
