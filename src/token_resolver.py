@@ -6,8 +6,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 import aiohttp
 import logging
+import asyncio
+from logger import logger
+from network import TOKEN_PROGRAM_ID
 
-TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+logger = logger.bind(name="token_resolver")
 
 
 @dataclass
@@ -165,4 +168,5 @@ class TokenResolver:
         """Close the aiohttp session"""
         if self.session:
             await self.session.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
             self.session = None

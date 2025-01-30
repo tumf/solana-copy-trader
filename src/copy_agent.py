@@ -6,6 +6,7 @@ import base58
 from solders.keypair import Keypair  # type: ignore
 from solana.rpc.async_api import AsyncClient
 import os
+import aiohttp
 
 from token_resolver import TokenResolver
 from portfolio import Portfolio, TokenBalance, PortfolioAnalyzer
@@ -61,14 +62,31 @@ class CopyTradeAgent:
         """Close all connections"""
         if self.client:
             await self.client.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
             self.client = None
-        await self.portfolio_analyzer.close()
-        await self.trade_executer.close()
+        if self.token_resolver:
+            await self.token_resolver.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
+            self.token_resolver = None
+        if self.portfolio_analyzer:
+            await self.portfolio_analyzer.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
+            self.portfolio_analyzer = None
+        if self.trade_planner:
+            await self.trade_planner.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
+            self.trade_planner = None
+        if self.trade_executer:
+            await self.trade_executer.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
+            self.trade_executer = None
 
     async def initialize(self):
         """Initialize components"""
-        await self.portfolio_analyzer.initialize()
-        await self.trade_executer.initialize()
+        if self.portfolio_analyzer:
+            await self.portfolio_analyzer.initialize()
+        if self.trade_executer:
+            await self.trade_executer.initialize()
 
     async def get_wallet_portfolio(self, wallet_address: str) -> Portfolio:
         """Get wallet portfolio with USD values"""
@@ -162,7 +180,9 @@ class CopyTradeAgent:
         self, current_portfolio: Portfolio, target_portfolio: Portfolio
     ):
         """Create trade plan to match target portfolio with risk management and tolerance"""
-        return await self.trade_planner.create_trade_plan(current_portfolio, target_portfolio)
+        return await self.trade_planner.create_trade_plan(
+            current_portfolio, target_portfolio
+        )
 
     async def check_gas_balance(self) -> bool:
         """Check if wallet has enough SOL for gas"""

@@ -53,30 +53,25 @@ class Portfolio:
 
 class PortfolioAnalyzer:
     def __init__(self):
-        self.rpc_url = "https://api.mainnet-beta.solana.com"
-        self.session = None
         self.token_resolver = TokenResolver()
         self.token_price_resolver = TokenPriceResolver()
-        self.headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
-    @logger.catch
-    async def ensure_session(self):
-        if self.session is None:
-            self.session = aiohttp.ClientSession(headers=self.headers)
-        return self.session
 
     @logger.catch
     async def close(self):
-        if self.session:
-            await self.session.close()
-            self.session = None
-        await self.token_resolver.close()
-        await self.token_price_resolver.close()
+        """Close all connections"""
+        if self.token_resolver:
+            await self.token_resolver.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
+            self.token_resolver = None
+        if self.token_price_resolver:
+            await self.token_price_resolver.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
+            self.token_price_resolver = None
 
     @logger.catch
     async def initialize(self):
         """Initialize portfolio analyzer"""
-        await self.ensure_session()
         await self.token_resolver.initialize()
         await self.token_price_resolver.initialize()
 

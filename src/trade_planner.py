@@ -35,11 +35,14 @@ class TradePlanner:
 
     async def initialize(self):
         """Initialize trade planner"""
-        await self.token_price_resolver.initialize()
+        if self.token_price_resolver:
+            await self.token_price_resolver.initialize()
 
     async def close(self):
         """Close all connections"""
-        await self.token_price_resolver.close()
+        if self.token_price_resolver:
+            await self.token_price_resolver.close()
+            self.token_price_resolver = None
 
     async def create_trade_plan(
         self, current_portfolio: Portfolio, target_portfolio: Portfolio
@@ -59,15 +62,24 @@ class TradePlanner:
         # Get all token prices at once
         prices = await self.token_price_resolver.get_token_prices(list(all_tokens))
 
+        adjusted_target = {}
+        total_adjusted_weight = Decimal(0)
         for mint in all_tokens:
-            # USDCとSOLの取引はスキップ
             if mint == USDC_MINT:
-                logger.debug(f"Skipping USDC trade")
                 continue
-            if mint == SOL_MINT:
-                logger.debug(f"Skipping SOL trade")
-                continue
+            if mint in target_portfolio.token_balances:
+                weight = target_portfolio.token_balances[mint].weight * Decimal(1)
+                adjusted_target[mint] = weight
+                total_adjusted_weight += weight
 
+        # USDCのウェイトを残りの割合に設定
+        usdc_weight = Decimal(1) - total_adjusted_weight
+        if USDC_MINT in target_portfolio.token_balances:
+            adjusted_target[USDC_MINT] = usdc_weight
+
+        for mint in all_tokens:
+            if mint == USDC_MINT:
+                continue
             # Get token price from cache
             price = prices.get(mint, Decimal(0))
             current = current_portfolio.token_balances.get(mint)
@@ -87,9 +99,7 @@ class TradePlanner:
                     else Decimal(0)
                 )
 
-            target_weight = Decimal(0)
-            if target:
-                target_weight = target.weight  # 目標ポートフォリオの重みを直接使用
+            target_weight = adjusted_target.get(mint, Decimal(0))
 
             # 重みの差を計算
             weight_diff = abs(target_weight - current_weight)
@@ -129,7 +139,9 @@ class TradePlanner:
                 # 売り注文：現在の重みと目標の重みの差に基づいて計算
                 trade_value = current_total * (current_weight - target_weight)
                 # 売却後の残高が最小取引サイズを下回る場合は全て売却
-                remaining_value = current.usd_value - trade_value if current else Decimal(0)
+                remaining_value = (
+                    current.usd_value - trade_value if current else Decimal(0)
+                )
                 if Decimal("0") < remaining_value < self.risk_config.min_trade_size_usd:
                     logger.debug(
                         f"Remaining balance would be too small (${remaining_value:,.2f}), selling entire position for {symbol}"
@@ -190,45 +202,113 @@ class TradePlanner:
         sell_trades = [t for t in trades if t["type"] == "sell"]
         buy_trades = [t for t in trades if t["type"] == "buy"]
 
+        # トークンペアごとに取引を集約
+        pair_trades: Dict[str, Dict] = {}
+        for sell_trade in sell_trades:
+            for buy_trade in buy_trades:
+                pair_key = f"{sell_trade['mint']}->{buy_trade['mint']}"
+                if pair_key not in pair_trades:
+                    pair_trades[pair_key] = {
+                        "type": "swap",
+                        "from_symbol": sell_trade["symbol"],
+                        "from_mint": sell_trade["mint"],
+                        "from_amount": Decimal(0),
+                        "to_symbol": buy_trade["symbol"],
+                        "to_mint": buy_trade["mint"],
+                        "to_amount": Decimal(0),
+                        "usd_value": Decimal(0),
+                    }
+
+                # 取引価値の小さい方を基準に合成
+                trade_value = min(sell_trade["usd_value"], buy_trade["usd_value"])
+                if trade_value < self.risk_config.min_trade_size_usd:
+                    continue
+
+                pair_trades[pair_key]["from_amount"] += (
+                    trade_value / sell_trade["usd_value"]
+                ) * sell_trade["amount"]
+                pair_trades[pair_key]["to_amount"] += (
+                    trade_value / buy_trade["usd_value"]
+                ) * buy_trade["amount"]
+                pair_trades[pair_key]["usd_value"] += trade_value
+
+                # 使用した取引価値を減算
+                sell_trade["usd_value"] -= trade_value
+                buy_trade["usd_value"] -= trade_value
+
+        # 残りの売り注文を集約
+        sell_aggregated: Dict[str, Dict] = {}
+        for trade in sell_trades:
+            if trade["usd_value"] < self.risk_config.min_trade_size_usd:
+                continue
+
+            mint = trade["mint"]
+            if mint not in sell_aggregated:
+                sell_aggregated[mint] = {
+                    "type": "sell",
+                    "symbol": trade["symbol"],
+                    "mint": mint,
+                    "amount": Decimal(0),
+                    "usd_value": Decimal(0),
+                }
+            sell_aggregated[mint]["amount"] += trade["amount"]
+            sell_aggregated[mint]["usd_value"] += trade["usd_value"]
+
+        # 集約された取引を最大取引サイズで分割
         optimized_trades = []
-        sell_index = 0
-        buy_index = 0
 
-        while sell_index < len(sell_trades) and buy_index < len(buy_trades):
-            sell_trade = sell_trades[sell_index]
-            buy_trade = buy_trades[buy_index]
+        # スワップ取引の分割
+        for trade in pair_trades.values():
+            if trade["usd_value"] < self.risk_config.min_trade_size_usd:
+                continue
 
-            # 取引価値の小さい方を基準に合成
-            trade_value = min(sell_trade["usd_value"], buy_trade["usd_value"])
+            remaining_value = trade["usd_value"]
+            while remaining_value > 0:
+                batch_value = min(remaining_value, self.risk_config.max_trade_size_usd)
+                if batch_value < self.risk_config.min_trade_size_usd:
+                    break
 
-            # 合成取引を作成
-            optimized_trades.append({
-                "type": "swap",
-                "from_symbol": sell_trade["symbol"],
-                "from_mint": sell_trade["mint"],
-                "from_amount": (trade_value / sell_trade["usd_value"]) * sell_trade["amount"],
-                "to_symbol": buy_trade["symbol"],
-                "to_mint": buy_trade["mint"],
-                "to_amount": (trade_value / buy_trade["usd_value"]) * buy_trade["amount"],
-                "usd_value": trade_value,
-            })
+                ratio = batch_value / trade["usd_value"]
+                optimized_trades.append(
+                    {
+                        "type": "swap",
+                        "from_symbol": trade["from_symbol"],
+                        "from_mint": trade["from_mint"],
+                        "from_amount": trade["from_amount"] * ratio,
+                        "to_symbol": trade["to_symbol"],
+                        "to_mint": trade["to_mint"],
+                        "to_amount": trade["to_amount"] * ratio,
+                        "usd_value": batch_value,
+                    }
+                )
+                remaining_value -= batch_value
 
-            # 残りの取引価値を更新
-            sell_trade["usd_value"] -= trade_value
-            buy_trade["usd_value"] -= trade_value
-            sell_trade["amount"] = (sell_trade["usd_value"] / trade_value) * sell_trade["amount"] if trade_value > 0 else Decimal(0)
-            buy_trade["amount"] = (buy_trade["usd_value"] / trade_value) * buy_trade["amount"] if trade_value > 0 else Decimal(0)
+        # 売り取引の分割
+        for trade in sell_aggregated.values():
+            remaining_value = trade["usd_value"]
+            while remaining_value > 0:
+                batch_value = min(remaining_value, self.risk_config.max_trade_size_usd)
+                if batch_value < self.risk_config.min_trade_size_usd:
+                    break
 
-            # 完了した取引を次に進める
-            if sell_trade["usd_value"] < self.risk_config.min_trade_size_usd:
-                sell_index += 1
-            if buy_trade["usd_value"] < self.risk_config.min_trade_size_usd:
-                buy_index += 1
+                ratio = batch_value / trade["usd_value"]
+                optimized_trades.append(
+                    {
+                        "type": "sell",
+                        "symbol": trade["symbol"],
+                        "mint": trade["mint"],
+                        "amount": trade["amount"] * ratio,
+                        "usd_value": batch_value,
+                    }
+                )
+                remaining_value -= batch_value
 
-        # 残りの取引を追加
-        remaining_trades = []
-        remaining_trades.extend(sell_trades[sell_index:])
-        remaining_trades.extend(buy_trades[buy_index:])
-        optimized_trades.extend([t for t in remaining_trades if t["usd_value"] >= self.risk_config.min_trade_size_usd])
+        # 残りの買い注文を追加（未使用分）
+        remaining_buys = [
+            t
+            for t in buy_trades
+            if t["usd_value"] >= self.risk_config.min_trade_size_usd
+        ]
+        optimized_trades.extend(remaining_buys)
 
         return optimized_trades

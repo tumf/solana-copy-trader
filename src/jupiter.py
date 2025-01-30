@@ -29,6 +29,7 @@ class JupiterClient:
         """Close the session"""
         if self.session:
             await self.session.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
             self.session = None
 
     async def get_token_prices(self, mints: List[str]) -> Dict[str, Decimal]:

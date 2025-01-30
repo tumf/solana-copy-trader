@@ -29,16 +29,25 @@ class TradeExecuter:
     async def initialize(self):
         """Initialize trade executer"""
         await self.jupiter_client.initialize()
+        for dex in self.dexes:
+            if hasattr(dex, "initialize"):
+                await dex.initialize()
 
     async def close(self):
         """Close all connections"""
         if self.client:
             await self.client.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
             self.client = None
+        if self.jupiter_client:
+            await self.jupiter_client.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
+            self.jupiter_client = None
         for dex in self.dexes:
             if hasattr(dex, "close"):
                 await dex.close()
-        await self.jupiter_client.close()
+                await asyncio.sleep(0.1)  # Give time for the session to close properly
+        self.dexes = []
 
     async def get_best_quote(
         self,

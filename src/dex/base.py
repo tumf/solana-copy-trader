@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
+import aiohttp
+import asyncio
 
 
 @dataclass
@@ -34,6 +36,21 @@ class DEX(ABC):
     def __init__(self, rpc_url: str):
         self.rpc_url = rpc_url
         self.client = MockAsyncClient()
+        self.session = None
+        self.headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+
+    async def ensure_session(self):
+        """Ensure aiohttp session is initialized"""
+        if self.session is None:
+            self.session = aiohttp.ClientSession(headers=self.headers)
+        return self.session
+
+    async def close(self):
+        """Close all connections"""
+        if self.session:
+            await self.session.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
+            self.session = None
 
     @property
     @abstractmethod
