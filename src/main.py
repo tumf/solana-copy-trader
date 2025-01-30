@@ -75,36 +75,34 @@ async def main():
             logger.info(f"  {mint}: ${balance.usd_value:.2f} ({weight:.1%})")
 
         logger.info("Target Portfolio:")
-        # Sort by weight in descending order
+        # Sort by USD value
         sorted_balances = sorted(
-            target_portfolio.token_balances.items(),
-            key=lambda x: target_portfolio.get_token_weight(x[0]),
+            target_portfolio.token_balances.values(),
+            key=lambda x: float(x.usd_value),  # Convert to float for sorting
             reverse=True,
         )
-        for mint, balance in sorted_balances:
-            weight = target_portfolio.get_token_weight(mint)
-            if weight < Decimal("0.001"):  # Skip if weight is less than 0.1%
-                continue
-            metadata = await agent._get_token_metadata(mint)
-            symbol = metadata.get("symbol", mint[:8] + "...")
-            logger.info(f"  {symbol}: {mint} ${balance.usd_value:.2f} ({weight:.1%})")
+        logger.info(f"Total value: ${target_portfolio.total_value_usd:,.2f}")
+        for balance in sorted_balances:
+            if float(balance.usd_value) >= 1:  # Convert to float for comparison
+                logger.info(
+                    f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {balance.weight:6.2%}"
+                )
 
-        # Create trade plan
-        logger.info("\nCreating trade plan...")
+        logger.info("Creating trade plan...")
         trades = await agent.create_trade_plan(current_portfolio, target_portfolio)
 
         if trades:
             logger.info(f"Found {len(trades)} trades to execute:")
-            total_value = sum(t["usd_value"] for t in trades)
+            total_value = Decimal(str(sum(t["usd_value"] for t in trades)))
             for trade in trades:
+                trade_value = Decimal(str(trade["usd_value"]))
                 logger.info(
                     f"  {trade['type'].upper()}: {trade['mint']} "
-                    f"for ${trade['usd_value']:.2f} "
-                    f"({trade['usd_value']/total_value:.1%} of total trades)"
+                    f"for ${trade_value:.2f} "
+                    f"({trade_value/total_value:.1%} of total trades)"
                 )
 
-            # Ask for confirmation before executing trades
-            confirmation = input("\nExecute these trades? [y/N]: ")
+            confirmation = input("Execute these trades? [y/N]: ")
             if confirmation.lower() == "y":
                 logger.info("Executing trades...")
                 await agent.execute_trades(trades)

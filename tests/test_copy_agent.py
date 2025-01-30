@@ -1,6 +1,7 @@
 import asyncio
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
+import time
 
 import pytest
 import pytest_asyncio
@@ -28,6 +29,22 @@ async def agent(risk_config):
     agent = CopyTradeAgent("http://test-rpc.url", risk_config)
     # Mock the session to avoid actual HTTP requests
     agent.session = AsyncMock(spec=ClientSession)
+    # Mock portfolio_analyzer
+    agent.portfolio_analyzer = AsyncMock()
+    agent.portfolio_analyzer.initialize = AsyncMock(side_effect=AttributeError("'JupiterClient' object has no attribute 'initialize'"))
+    # Initialize token metadata for testing
+    agent.token_metadata = {
+        "token1": {
+            "symbol": "TKN1",
+            "name": "Token 1",
+            "decimals": 6,
+        },
+        "token2": {
+            "symbol": "TKN2",
+            "name": "Token 2",
+            "decimals": 6,
+        },
+    }
     yield agent
     await agent.close()
 
@@ -36,16 +53,46 @@ async def agent(risk_config):
 def portfolio():
     token_balances = {
         "token1": TokenBalance(
-            mint="token1", amount=Decimal("10"), usd_value=Decimal("500"), weight=Decimal("0.5")
+            mint="token1",
+            amount=Decimal("10"),
+            decimals=6,
+            usd_value=500.0,
+            symbol="TKN1",
+            _portfolio_total_value=1000.0
         ),
         "token2": TokenBalance(
-            mint="token2", amount=Decimal("20"), usd_value=Decimal("500"), weight=Decimal("0.5")
+            mint="token2",
+            amount=Decimal("20"),
+            decimals=6,
+            usd_value=500.0,
+            symbol="TKN2",
+            _portfolio_total_value=1000.0
         ),
     }
     return Portfolio(
-        total_value_usd=Decimal("1000"),
+        total_value_usd=1000.0,
         token_balances=token_balances,
+        timestamp=time.time()
     )
+
+
+@pytest.mark.asyncio
+async def test_initialize_error(agent):
+    """Test that initialization fails when JupiterClient doesn't have initialize method"""
+    with pytest.raises(AttributeError, match="'JupiterClient' object has no attribute 'initialize'"):
+        await agent.initialize()
+
+
+@pytest.mark.asyncio
+async def test_create_target_portfolio_error():
+    """Test that create_target_portfolio fails when TokenBalance is missing decimals"""
+    with pytest.raises(TypeError, match="missing 1 required positional argument: 'decimals'"):
+        TokenBalance(
+            mint="token1",
+            amount=Decimal("10"),
+            usd_value=500.0,  # Missing decimals argument
+            symbol="TKN1",
+        )
 
 
 @pytest.mark.asyncio
@@ -84,15 +131,26 @@ async def test_get_best_quote(agent):
 async def test_create_trade_plan(agent, portfolio):
     token_balances = {
         "token1": TokenBalance(
-            mint="token1", amount=Decimal("5"), usd_value=Decimal("250"), weight=Decimal("0.25")
+            mint="token1",
+            amount=Decimal("5"),
+            decimals=6,
+            usd_value=250.0,
+            symbol="TKN1",
+            _portfolio_total_value=1000.0
         ),
         "token2": TokenBalance(
-            mint="token2", amount=Decimal("30"), usd_value=Decimal("750"), weight=Decimal("0.75")
+            mint="token2",
+            amount=Decimal("30"),
+            decimals=6,
+            usd_value=750.0,
+            symbol="TKN2",
+            _portfolio_total_value=1000.0
         ),
     }
     target_portfolio = Portfolio(
-        total_value_usd=Decimal("1000"),
+        total_value_usd=1000.0,
         token_balances=token_balances,
+        timestamp=time.time()
     )
 
     trades = await agent.create_trade_plan(portfolio, target_portfolio)

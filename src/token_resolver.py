@@ -18,12 +18,18 @@ class TokenAccount:
 
 
 class TokenResolver:
-    def __init__(self, db_url: str = "sqlite:///data/solana.db"):
-        self.engine = create_engine(db_url)
-        self._cache: Dict[str, Token] = {}
-        self.logger = logging.getLogger(__name__)
+    def __init__(self):
         self.rpc_url = "https://api.mainnet-beta.solana.com"
         self.session = None
+        self.client = None
+        self.token_db = {}
+        self.engine = create_engine("sqlite:///data/solana.db")
+        self._cache: Dict[str, Token] = {}
+        self.logger = logging.getLogger(__name__)
+
+    async def initialize(self):
+        """Initialize token resolver"""
+        await self.ensure_session()
 
     def get_token_info(self, address: str) -> Optional[Dict]:
         """Get token information from cache or database"""

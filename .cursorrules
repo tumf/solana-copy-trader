@@ -9,3 +9,7 @@
 
 please use English for comments in the code.
 please talk in Japanese with me.
+
+remove none sense new line in front of log
+BAD:        logger.info("\nAnalyzing source portfolio...")
+GOOD:        logger.info("Analyzing source portfolio...")

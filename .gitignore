@@ -11,3 +11,4 @@ wheels/
 data/
 .coverage
 wallet.key
+logs/
