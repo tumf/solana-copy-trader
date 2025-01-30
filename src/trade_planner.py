@@ -220,6 +220,9 @@ class TradePlanner:
 
         # トークンペアごとに取引を集約
         pair_trades: Dict[str, SwapTrade] = {}
+        intermediate_trades: Dict[str, List[SwapTrade]] = {}
+
+        # 最初のパスで取引を集約
         for trade in trades:
             pair_key = f"{trade['from_mint']}->{trade['to_mint']}"
             if pair_key not in pair_trades:
@@ -238,10 +241,75 @@ class TradePlanner:
             pair_trades[pair_key].to_amount += trade["to_amount"]
             pair_trades[pair_key].usd_value += trade["usd_value"]
 
-        # 集約された取引を最大取引サイズで分割
-        optimized_trades: List[Trade] = []
+            # 中間トークンを使用する取引を記録
+            if trade["to_mint"] == USDC_MINT:
+                from_key = trade["from_mint"]
+                if from_key not in intermediate_trades:
+                    intermediate_trades[from_key] = []
+                intermediate_trades[from_key].append(pair_trades[pair_key])
+            elif trade["from_mint"] == USDC_MINT:
+                to_key = trade["to_mint"]
+                if to_key not in intermediate_trades:
+                    intermediate_trades[to_key] = []
+                intermediate_trades[to_key].append(pair_trades[pair_key])
 
+        # 中間トークンを使用する取引を直接取引に変換
+        optimized_pairs: Dict[str, SwapTrade] = {}
+        for from_mint, from_trades in intermediate_trades.items():
+            for to_mint, to_trades in intermediate_trades.items():
+                if from_mint != to_mint:
+                    # 同じ中間トークンを使用する取引ペアを見つける
+                    for from_trade in from_trades:
+                        for to_trade in to_trades:
+                            if (from_trade.to_mint == USDC_MINT and 
+                                to_trade.from_mint == USDC_MINT):
+                                # 取引サイズの小さい方を基準に直接取引を作成
+                                match_value = min(from_trade.usd_value, to_trade.usd_value)
+                                if match_value >= self.risk_config.min_trade_size_usd:
+                                    from_ratio = match_value / from_trade.usd_value
+                                    to_ratio = match_value / to_trade.usd_value
+
+                                    direct_key = f"{from_mint}->{to_mint}"
+                                    if direct_key not in optimized_pairs:
+                                        optimized_pairs[direct_key] = SwapTrade(
+                                            type="swap",
+                                            from_symbol=from_trade.from_symbol,
+                                            from_mint=from_mint,
+                                            from_amount=Decimal(0),
+                                            to_symbol=to_trade.to_symbol,
+                                            to_mint=to_mint,
+                                            to_amount=Decimal(0),
+                                            usd_value=Decimal(0),
+                                        )
+
+                                    direct_trade = optimized_pairs[direct_key]
+                                    direct_trade.from_amount += from_trade.from_amount * from_ratio
+                                    direct_trade.to_amount += to_trade.to_amount * to_ratio
+                                    direct_trade.usd_value += match_value
+
+                                    # 元の取引から使用した分を減らす
+                                    from_trade.from_amount -= from_trade.from_amount * from_ratio
+                                    from_trade.to_amount -= from_trade.to_amount * from_ratio
+                                    from_trade.usd_value -= match_value
+
+                                    to_trade.from_amount -= to_trade.from_amount * to_ratio
+                                    to_trade.to_amount -= to_trade.to_amount * to_ratio
+                                    to_trade.usd_value -= match_value
+
+        # 残りの取引を追加
         for trade in pair_trades.values():
+            if trade.usd_value >= self.risk_config.min_trade_size_usd:
+                pair_key = f"{trade.from_mint}->{trade.to_mint}"
+                if pair_key not in optimized_pairs:
+                    optimized_pairs[pair_key] = trade
+                else:
+                    optimized_pairs[pair_key].from_amount += trade.from_amount
+                    optimized_pairs[pair_key].to_amount += trade.to_amount
+                    optimized_pairs[pair_key].usd_value += trade.usd_value
+
+        # 最適化された取引を最大取引サイズで分割
+        optimized_trades: List[Trade] = []
+        for trade in optimized_pairs.values():
             if trade.usd_value < self.risk_config.min_trade_size_usd:
                 continue
 
