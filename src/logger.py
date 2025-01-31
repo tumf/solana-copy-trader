@@ -1,6 +1,7 @@
-from loguru import logger
-import sys
 import os
+import sys
+
+from loguru import logger
 
 # Remove default handler
 logger.remove()
@@ -13,7 +14,7 @@ logger.add(
     sys.stdout,
     colorize=True,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> - <level>{message}</level>",
-    level="INFO"
+    level="INFO",
 )
 
 # Add file handler for debugging
@@ -23,8 +24,9 @@ logger.add(
     retention="10 days",
     compression="zip",
     format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name} - {message}",
-    level="DEBUG"
+    level="DEBUG",
 )
+
 
 def log_debug(msg: str):
     """Debug level log message"""
@@ -43,4 +45,4 @@ def log_warning(msg: str):
 
 def log_error(msg: str):
     """Error level log message"""
-    logger.error(msg) 
+    logger.error(msg)

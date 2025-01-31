@@ -1,12 +1,12 @@
 import asyncio
 import os
 from decimal import Decimal
-from pathlib import Path
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from copy_agent import CopyTradeAgent, RiskConfig
+from copy_agent import CopyTradeAgent
+from models import RiskConfig
 
 
 def load_risk_config() -> RiskConfig:

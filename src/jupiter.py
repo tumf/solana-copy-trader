@@ -1,8 +1,9 @@
+import asyncio
 from decimal import Decimal
 from typing import Dict, List
+
 import aiohttp
 from loguru import logger
-import asyncio
 
 # Jupiter API limits
 MAX_IDS_PER_REQUEST = 100

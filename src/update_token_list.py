@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 import asyncio
+import logging
 import os
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Dict, List
+
 import aiohttp
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+
 from models import Base, Token
-from dotenv import load_dotenv
-import logging
 
 # Load environment variables from .env file
 load_dotenv()

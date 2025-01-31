@@ -1,20 +1,21 @@
 import asyncio
+import os
 import time
 from decimal import Decimal
 from typing import Dict, List, Optional
-import base58
-from solders.keypair import Keypair  # type: ignore
-from solana.rpc.async_api import AsyncClient
-import os
-import aiohttp
 
-from token_resolver import TokenResolver
-from portfolio import Portfolio, TokenBalance, PortfolioAnalyzer
-from trade_planner import TradePlanner, RiskConfig
-from trade_executer import TradeExecuter
+import base58
+from solana.rpc.async_api import AsyncClient
+from solders.keypair import Keypair
+from solders.pubkey import Pubkey
+
 from logger import logger
-from network import USDC_MINT, TOKEN_PROGRAM_ID
-from models import Trade, SwapTrade
+from models import TokenAlias, Trade
+from network import USDC_MINT
+from portfolio import Portfolio, PortfolioAnalyzer, TokenBalance
+from token_resolver import TokenResolver
+from trade_executer import TradeExecuter
+from trade_planner import RiskConfig, TradePlanner
 
 logger = logger.bind(name="copy_agent")
 
@@ -23,6 +24,7 @@ class CopyTradeAgent:
     def __init__(
         self,
         rpc_url: str,
+        token_aliases: Optional[List[TokenAlias]] = None,
         risk_config: Optional[RiskConfig] = None,
     ):
         self.rpc_url = rpc_url
@@ -41,8 +43,10 @@ class CopyTradeAgent:
         )
 
         self.token_resolver = TokenResolver()
-        self.portfolio_analyzer = PortfolioAnalyzer()
-        self.trade_planner = TradePlanner(self.risk_config)
+        if token_aliases:
+            self.token_resolver.set_token_aliases(token_aliases)
+        self.portfolio_analyzer = PortfolioAnalyzer(self.token_resolver)
+        self.trade_planner = TradePlanner(self.risk_config, token_aliases)
         self.trade_executer = TradeExecuter(rpc_url, self.risk_config.max_slippage_bps)
 
     def set_wallet_address(self, wallet_address: str):
@@ -190,7 +194,9 @@ class CopyTradeAgent:
         if not self.wallet_address:
             raise ValueError("Wallet address not set")
 
-        sol_balance = await self.client.get_balance(self.wallet_address)
+        sol_balance = await self.client.get_balance(
+            Pubkey.from_string(self.wallet_address)
+        )
         return (
             Decimal(sol_balance.value) / Decimal(1e9) >= self.risk_config.gas_buffer_sol
         )
@@ -208,8 +214,18 @@ class CopyTradeAgent:
 
 
 async def main():
+    token_aliases = [
+        TokenAlias(
+            address=USDC_MINT,
+            aliases=[
+                "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT
+            ],
+        )
+    ]
     # Initialize agent with Solana mainnet RPC URL
-    agent = CopyTradeAgent("https://api.mainnet-beta.solana.com")
+    agent = CopyTradeAgent(
+        rpc_url="https://api.mainnet-beta.solana.com", token_aliases=token_aliases
+    )
 
     # Set wallet from environment variables
     has_private_key = False
@@ -228,7 +244,9 @@ async def main():
         # Get current portfolio
         logger.info("Getting current portfolio...")
         current_portfolio = await agent.get_wallet_portfolio(agent.wallet_address)
-        logger.info(f"Current portfolio value: ${current_portfolio.total_value_usd:,.2f}")
+        logger.info(
+            f"Current portfolio value: ${current_portfolio.total_value_usd:,.2f}"
+        )
         sorted_balances = sorted(
             current_portfolio.token_balances.values(),
             key=lambda x: float(x.usd_value),
@@ -278,7 +296,9 @@ async def main():
             logger.info("Executing trades...")
             await agent.execute_trades(trades)
         elif trades:
-            logger.info("Skipping trade execution because WALLET_PRIVATE_KEY is not set")
+            logger.info(
+                "Skipping trade execution because WALLET_PRIVATE_KEY is not set"
+            )
 
     except Exception as e:
         logger.error(f"Error in main: {e}")

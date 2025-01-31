@@ -1,1 +1,1 @@
-"""Solana Copy Trader package.""" 
+"""Solana Copy Trader package."""

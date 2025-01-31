@@ -1,7 +1,8 @@
 from decimal import Decimal
 from typing import Dict, List
-from logger import logger
+
 from jupiter import JupiterClient
+from logger import logger
 
 logger = logger.bind(name="token_price_resolver")
 

@@ -2,13 +2,11 @@ import asyncio
 import time
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Dict, Optional, List
-import aiohttp
-from logger import logger
+from typing import Dict, Optional
 
-from token_resolver import TokenResolver
+from logger import logger
 from token_price_resolver import TokenPriceResolver
-from network import USDC_MINT
+from token_resolver import TokenResolver
 
 # Set logger name for this module
 logger = logger.bind(name="portfolio")
@@ -52,10 +50,9 @@ class Portfolio:
 
 
 class PortfolioAnalyzer:
-    def __init__(self):
-        self.token_resolver = TokenResolver()
+    def __init__(self, token_resolver: Optional[TokenResolver] = None):
+        self.token_resolver = token_resolver or TokenResolver()
         self.token_price_resolver = TokenPriceResolver()
-
 
     @logger.catch
     async def close(self):
@@ -106,11 +103,13 @@ class PortfolioAnalyzer:
             logger.debug(f"Found {len(mints)} active token accounts")
 
             # Create portfolio entries
-            token_balances = {}
+            token_balances: Dict[str, TokenBalance] = {}
             total_value_usd = Decimal("0")
             # Get prices for all tokens at once
             active_mints = [
-                account.mint for account in token_accounts if account.amount > 0
+                self.token_resolver.resolve_address(account.mint)
+                for account in token_accounts
+                if account.amount > 0
             ]
             prices = await self.token_price_resolver.get_token_prices(active_mints)
 
@@ -118,20 +117,26 @@ class PortfolioAnalyzer:
                 if account.amount == 0:
                     continue
 
-                price = prices.get(account.mint, Decimal(0))
+                resolved_mint = self.token_resolver.resolve_address(account.mint)
+                price = prices.get(resolved_mint, Decimal(0))
                 usd_value = account.amount * price
                 total_value_usd += usd_value
 
-                metadata = await self._get_token_metadata(account.mint)
-                symbol = metadata.get("symbol", account.mint[:8] + "...")
+                metadata = await self._get_token_metadata(resolved_mint)
+                symbol = metadata.get("symbol", resolved_mint[:8] + "...")
 
-                token_balances[account.mint] = TokenBalance(
-                    mint=account.mint,
-                    amount=account.amount,
-                    decimals=account.decimals,
-                    usd_value=usd_value,
-                    symbol=symbol,
-                )
+                # 同じトークンの場合は合算する
+                if resolved_mint in token_balances:
+                    token_balances[resolved_mint].amount += account.amount
+                    token_balances[resolved_mint].usd_value += usd_value
+                else:
+                    token_balances[resolved_mint] = TokenBalance(
+                        mint=resolved_mint,
+                        amount=account.amount,
+                        decimals=account.decimals,
+                        usd_value=usd_value,
+                        symbol=symbol,
+                    )
                 logger.debug(
                     f"Processed token {symbol}: {account.amount} (${usd_value:,.2f})"
                 )

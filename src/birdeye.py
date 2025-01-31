@@ -1,4 +1,3 @@
-import base64
 import os
 from decimal import Decimal
 from typing import Dict, Optional
@@ -7,7 +6,6 @@ import aiohttp
 from loguru import logger
 from solana.rpc.async_api import AsyncClient
 from solders.pubkey import Pubkey
-from spl.token.constants import TOKEN_PROGRAM_ID
 
 
 class BirdEyeClient:
@@ -51,15 +49,15 @@ class BirdEyeClient:
         params = {
             "address": token_address,
         }
-        
+
         async with session.get(url, params=params) as response:
             if response.status != 200:
                 raise Exception(f"Failed to get price: {await response.text()}")
-            
+
             data = await response.json()
             if not data.get("success"):
                 raise Exception(f"API error: {data.get('message')}")
-            
+
             return Decimal(str(data.get("data", {}).get("value", 0)))
 
     async def get_token_metadata(self, token_address: str) -> Dict:
@@ -75,7 +73,7 @@ class BirdEyeClient:
         # Parse token metadata
         data = account_info.value.data
         decimals = data[44] if len(data) >= 45 else 0
-        
+
         # Get token metadata from account data
         metadata = {
             "address": token_address,
@@ -86,32 +84,46 @@ class BirdEyeClient:
             # Try to get additional metadata from the token metadata program
             metadata_pda = await self._find_metadata_pda(token_pubkey)
             metadata_info = await solana.get_account_info(metadata_pda)
-            
+
             if metadata_info.value:
                 # Get metadata from the token metadata program
                 metadata_data = metadata_info.value.data
                 if len(metadata_data) > 0:
                     # Skip discriminator and update authority
                     offset = 1 + 32
-                    
+
                     # Get mint address
                     offset += 32
-                    
+
                     # Get name
-                    name_len = int.from_bytes(metadata_data[offset:offset + 4], byteorder="little")
+                    name_len = int.from_bytes(
+                        metadata_data[offset : offset + 4], byteorder="little"
+                    )
                     offset += 4
-                    name = metadata_data[offset:offset + name_len].decode("utf-8").rstrip("\x00")
+                    name = (
+                        metadata_data[offset : offset + name_len]
+                        .decode("utf-8")
+                        .rstrip("\x00")
+                    )
                     offset += name_len
-                    
+
                     # Get symbol
-                    symbol_len = int.from_bytes(metadata_data[offset:offset + 4], byteorder="little")
+                    symbol_len = int.from_bytes(
+                        metadata_data[offset : offset + 4], byteorder="little"
+                    )
                     offset += 4
-                    symbol = metadata_data[offset:offset + symbol_len].decode("utf-8").rstrip("\x00")
-                    
-                    metadata.update({
-                        "name": name,
-                        "symbol": symbol,
-                    })
+                    symbol = (
+                        metadata_data[offset : offset + symbol_len]
+                        .decode("utf-8")
+                        .rstrip("\x00")
+                    )
+
+                    metadata.update(
+                        {
+                            "name": name,
+                            "symbol": symbol,
+                        }
+                    )
         except Exception as e:
             logger.debug(f"Failed to get additional metadata: {e}")
 
@@ -119,11 +131,13 @@ class BirdEyeClient:
 
     async def _find_metadata_pda(self, mint: Pubkey) -> Pubkey:
         """Find the metadata PDA for a token mint"""
-        metadata_program_id = Pubkey.from_string("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s")
+        metadata_program_id = Pubkey.from_string(
+            "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+        )
         seeds = [
             b"metadata",
             bytes(metadata_program_id),
             bytes(mint),
         ]
         pda, _ = Pubkey.find_program_address(seeds, metadata_program_id)
-        return pda 
+        return pda

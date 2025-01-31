@@ -1,13 +1,15 @@
 import asyncio
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import List, Optional
+
 from solana.rpc.async_api import AsyncClient
-from solders.pubkey import Pubkey  # type: ignore
-from dex import DEX, JupiterDEX, MeteoraSwap, OrcaDEX, RaydiumDEX, SwapQuote, SwapResult
+from solders.pubkey import Pubkey
+
+from dex.base import SwapQuote, SwapResult
 from jupiter import JupiterClient
 from logger import logger
+from models import SwapTrade
 from network import USDC_MINT
-from models import Trade, SwapTrade
 
 logger = logger.bind(name="trade_executer")
 
@@ -19,20 +21,9 @@ class TradeExecuter:
         self.max_slippage_bps = max_slippage_bps
         self.jupiter_client = JupiterClient()
 
-        # Initialize DEXes
-        self.dexes: List[DEX] = [
-            JupiterDEX(rpc_url),
-            OrcaDEX(rpc_url),
-            MeteoraSwap(rpc_url),
-            RaydiumDEX(rpc_url),
-        ]
-
     async def initialize(self):
         """Initialize trade executer"""
         await self.jupiter_client.initialize()
-        for dex in self.dexes:
-            if hasattr(dex, "initialize"):
-                await dex.initialize()
 
     async def close(self):
         """Close all connections"""
@@ -44,11 +35,6 @@ class TradeExecuter:
             await self.jupiter_client.close()
             await asyncio.sleep(0.1)  # Give time for the session to close properly
             self.jupiter_client = None
-        for dex in self.dexes:
-            if hasattr(dex, "close"):
-                await dex.close()
-                await asyncio.sleep(0.1)  # Give time for the session to close properly
-        self.dexes = []
 
     async def get_best_quote(
         self,
@@ -57,22 +43,15 @@ class TradeExecuter:
         amount: int,
         slippage_bps: Optional[int] = None,
     ) -> Optional[SwapQuote]:
-        """Get the best quote from all available DEXes"""
-        slippage = slippage_bps or self.max_slippage_bps
-        quotes = []
-
-        for dex in self.dexes:
-            try:
-                quote = await dex.get_quote(input_mint, output_mint, amount, slippage)
-                quotes.append(quote)
-            except Exception as e:
-                logger.debug(f"Failed to get quote from {dex.name}: {e}")
-
-        if not quotes:
+        """Get the best quote from Jupiter"""
+        try:
+            quote = await self.jupiter_client.get_quote(
+                input_mint, output_mint, amount, slippage_bps or self.max_slippage_bps
+            )
+            return quote
+        except Exception as e:
+            logger.debug(f"Failed to get quote: {e}")
             return None
-
-        # 最良のレートを提供するDEXを選択
-        return max(quotes, key=lambda q: q.expected_output_amount)
 
     async def execute_swap_with_retry(
         self,
@@ -82,19 +61,20 @@ class TradeExecuter:
         max_retries: int = 3,
     ) -> SwapResult:
         """Execute swap with retry logic"""
-        for dex in self.dexes:
-            if dex.name == quote.dex_name:
-                for attempt in range(max_retries):
-                    result = await dex.execute_swap(
-                        quote, Pubkey.from_string(wallet_address), wallet_private_key
-                    )
-                    if result.success:
-                        return result
-                    logger.warning(
-                        f"Swap attempt {attempt + 1} failed: {result.error_message}"
-                    )
-                    await asyncio.sleep(1)
-                break
+        for attempt in range(max_retries):
+            try:
+                result = await self.jupiter_client.execute_swap(
+                    quote, Pubkey.from_string(wallet_address), wallet_private_key
+                )
+                if result.success:
+                    return result
+                logger.warning(
+                    f"Swap attempt {attempt + 1} failed: {result.error_message}"
+                )
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.warning(f"Swap attempt {attempt + 1} failed: {e}")
+                await asyncio.sleep(1)
 
         return SwapResult(
             success=False, tx_signature=None, error_message="Max retries exceeded"
@@ -123,7 +103,9 @@ class TradeExecuter:
         for trade in trades:
             try:
                 token_amount = int(trade.from_amount)
-                quote = await self.get_best_quote(trade.from_mint, trade.to_mint, token_amount)
+                quote = await self.get_best_quote(
+                    trade.from_mint, trade.to_mint, token_amount
+                )
                 if quote:
                     result = await self.execute_swap_with_retry(
                         quote, wallet_address, wallet_private_key
@@ -137,7 +119,9 @@ class TradeExecuter:
                             f"Failed to swap {trade.from_symbol} to {trade.to_symbol}: {result.error_message}"
                         )
                 else:
-                    logger.error(f"No quotes available for swapping {trade.from_symbol} to {trade.to_symbol}")
+                    logger.error(
+                        f"No quotes available for swapping {trade.from_symbol} to {trade.to_symbol}"
+                    )
 
                 # Wait between trades to avoid rate limits
                 await asyncio.sleep(1)
@@ -147,21 +131,27 @@ class TradeExecuter:
 
 
 async def main():
-    trade_executer = TradeExecuter(rpc_url="https://api.mainnet-beta.solana.com")
+    # Initialize trade executer with Solana mainnet RPC URL
+    trade_executer = TradeExecuter("https://api.mainnet-beta.solana.com", 100)
     await trade_executer.initialize()
+
+    # Example trades
     trades = [
         SwapTrade(
             type="swap",
-            from_symbol="USDC",
-            from_mint=USDC_MINT,
-            from_amount=Decimal("100"),
-            to_symbol="SOL",
-            to_mint="So11111111111111111111111111111111111111112",
-            to_amount=Decimal("0.1"),
-            usd_value=Decimal("100"),
+            from_symbol="SOL",
+            from_mint="So11111111111111111111111111111111111111112",
+            from_amount=Decimal("0.1"),
+            to_symbol="USDC",
+            to_mint=USDC_MINT,
+            to_amount=Decimal("2"),
+            usd_value=Decimal("2"),
         ),
     ]
-    await trade_executer.execute_trades(trades, wallet_address, wallet_private_key)
+    # Note: You need to set these variables before running this example
+    test_wallet_address = "your_wallet_address"
+    test_private_key = "your_private_key"
+    await trade_executer.execute_trades(trades, test_wallet_address, test_private_key)
     await trade_executer.close()
 
 

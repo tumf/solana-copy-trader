@@ -1,13 +1,15 @@
-from typing import Dict, Optional
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session
-from models import Token
+import asyncio
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Dict, List, Optional
+
 import aiohttp
-import logging
-import asyncio
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+
 from logger import logger
+from models import Token, TokenAlias
 from network import TOKEN_PROGRAM_ID
 
 logger = logger.bind(name="token_resolver")
@@ -29,6 +31,7 @@ class TokenResolver:
         self.engine = create_engine("sqlite:///data/solana.db")
         self._cache: Dict[str, Token] = {}
         self.logger = logging.getLogger(__name__)
+        self.token_replacement_map: Dict[str, str] = {}
 
     async def initialize(self):
         """Initialize token resolver"""
@@ -170,3 +173,16 @@ class TokenResolver:
             await self.session.close()
             await asyncio.sleep(0.1)  # Give time for the session to close properly
             self.session = None
+
+    def resolve_address(self, address: str) -> str:
+        """トークンの置換が設定されている場合は置換先のアドレスに変換する
+        例: USDT -> USDC"""
+        return self.token_replacement_map.get(address, address)
+
+    def set_token_aliases(self, token_aliases: List[TokenAlias]) -> None:
+        """トークンの置換マップを設定する"""
+        self.token_replacement_map.clear()
+        for alias in token_aliases:
+            # 置換対象のトークン(USDT)から、置換先のトークン(USDC)へのマッピング
+            for replaceable_token in alias.aliases:
+                self.token_replacement_map[replaceable_token] = alias.address
