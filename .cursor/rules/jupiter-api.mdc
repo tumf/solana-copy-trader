@@ -1,0 +1,8 @@
+---
+description: Juipiter API
+globs: 
+---
+## Jupiter API endpoints
+
+- price_url = "https://api.jup.ag/price/v2"
+- quote_url = "https://api.jup.ag/swap/v1"
