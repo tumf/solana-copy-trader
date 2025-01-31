@@ -13,6 +13,7 @@ from logger import logger
 from models import TokenAlias, Trade
 from network import USDC_MINT
 from portfolio import Portfolio, PortfolioAnalyzer, TokenBalance
+from token_price_resolver import TokenPriceResolver
 from token_resolver import TokenResolver
 from trade_executer import TradeExecuter
 from trade_planner import RiskConfig, TradePlanner
@@ -43,11 +44,22 @@ class CopyTradeAgent:
         )
 
         self.token_resolver = TokenResolver()
+        self.token_price_resolver = TokenPriceResolver(rpc_url=self.rpc_url)
         if token_aliases:
             self.token_resolver.set_token_aliases(token_aliases)
-        self.portfolio_analyzer = PortfolioAnalyzer(self.token_resolver)
-        self.trade_planner = TradePlanner(self.risk_config, token_aliases)
-        self.trade_executer = TradeExecuter(rpc_url, self.risk_config.max_slippage_bps)
+        self.portfolio_analyzer = PortfolioAnalyzer(
+            token_resolver=self.token_resolver,
+            token_price_resolver=self.token_price_resolver,
+        )
+        self.trade_planner = TradePlanner(
+            self.risk_config,
+            token_aliases,
+            token_price_resolver=self.token_price_resolver,
+            token_resolver=self.token_resolver,
+        )
+        self.trade_executer = TradeExecuter(
+            rpc_url=self.rpc_url, risk_config=self.risk_config
+        )
 
     def set_wallet_address(self, wallet_address: str):
         """Set wallet address for planning"""

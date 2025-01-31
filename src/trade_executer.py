@@ -8,18 +8,19 @@ from solders.pubkey import Pubkey
 from dex.base import SwapQuote, SwapResult
 from jupiter import JupiterClient
 from logger import logger
-from models import SwapTrade
+from models import RiskConfig, SwapTrade
 from network import USDC_MINT
 
 logger = logger.bind(name="trade_executer")
 
 
 class TradeExecuter:
-    def __init__(self, rpc_url: str, max_slippage_bps: int = 100):
+    def __init__(self, rpc_url: str, risk_config: RiskConfig):
         self.rpc_url = rpc_url
+        self.risk_config = risk_config
         self.client = AsyncClient(rpc_url)
-        self.max_slippage_bps = max_slippage_bps
-        self.jupiter_client = JupiterClient()
+        self.max_slippage_bps = risk_config.max_slippage_bps
+        self.jupiter_client = JupiterClient(rpc_url=self.rpc_url)
 
     async def initialize(self):
         """Initialize trade executer"""

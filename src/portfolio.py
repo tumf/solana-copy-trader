@@ -50,9 +50,13 @@ class Portfolio:
 
 
 class PortfolioAnalyzer:
-    def __init__(self, token_resolver: Optional[TokenResolver] = None):
+    def __init__(
+        self,
+        token_resolver: Optional[TokenResolver] = None,
+        token_price_resolver: Optional[TokenPriceResolver] = None,
+    ):
         self.token_resolver = token_resolver or TokenResolver()
-        self.token_price_resolver = TokenPriceResolver()
+        self.token_price_resolver = token_price_resolver or TokenPriceResolver()
 
     @logger.catch
     async def close(self):

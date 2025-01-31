@@ -11,7 +11,8 @@ logger = logger.bind(name="jupiter")
 
 
 class JupiterClient:
-    def __init__(self):
+    def __init__(self, rpc_url: str):
+        self.rpc_url = rpc_url
         self.session = None
         self.price_url = "https://api.jup.ag/price/v2"
         self.headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}

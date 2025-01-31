@@ -8,8 +8,9 @@ logger = logger.bind(name="token_price_resolver")
 
 
 class TokenPriceResolver:
-    def __init__(self):
-        self.jupiter_client = JupiterClient()
+    def __init__(self, rpc_url: str):
+        self.rpc_url = rpc_url
+        self.jupiter_client = JupiterClient(rpc_url=rpc_url)
 
     async def initialize(self):
         """Initialize price resolver"""

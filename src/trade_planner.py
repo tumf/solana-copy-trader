@@ -13,11 +13,15 @@ logger = logger.bind(name="trade_planner")
 
 class TradePlanner:
     def __init__(
-        self, risk_config: RiskConfig, token_aliases: Optional[List[TokenAlias]] = None
+        self,
+        risk_config: RiskConfig,
+        token_aliases: Optional[List[TokenAlias]] = None,
+        token_price_resolver: Optional[TokenPriceResolver] = None,
+        token_resolver: Optional[TokenResolver] = None,
     ):
         self.risk_config = risk_config
-        self.token_price_resolver = TokenPriceResolver()
-        self.token_resolver = TokenResolver()
+        self.token_price_resolver = token_price_resolver or TokenPriceResolver()
+        self.token_resolver = token_resolver or TokenResolver()
 
         # トークンの置換マップを作成 (例: USDT -> USDC)
         self.token_replacement_map: Dict[str, str] = {}
