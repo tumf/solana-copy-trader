@@ -50,15 +50,24 @@ class BirdEyeClient:
             "address": token_address,
         }
 
-        async with session.get(url, params=params) as response:
-            if response.status != 200:
-                raise Exception(f"Failed to get price: {await response.text()}")
+        try:
+            async with session.get(url, params=params) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise ValueError(f"Failed to get price (HTTP {response.status}): {error_text}")
 
-            data = await response.json()
-            if not data.get("success"):
-                raise Exception(f"API error: {data.get('message')}")
+                data = await response.json()
+                if not data.get("success"):
+                    raise ValueError(f"API error: {data.get('message')}")
 
-            return Decimal(str(data.get("data", {}).get("value", 0)))
+                price = data.get("data", {}).get("value")
+                if price is None:
+                    raise ValueError(f"No price data available for token {token_address}")
+
+                return Decimal(str(price))
+        except (aiohttp.ClientError, ValueError) as e:
+            logger.exception(f"Failed to get price for token {token_address}: {e}")
+            raise
 
     async def get_token_metadata(self, token_address: str) -> Dict:
         """Get token metadata from SPL Token Program"""
@@ -125,7 +134,7 @@ class BirdEyeClient:
                         }
                     )
         except Exception as e:
-            logger.debug(f"Failed to get additional metadata: {e}")
+            logger.exception(f"Failed to get additional metadata: {e}")
 
         return metadata
 

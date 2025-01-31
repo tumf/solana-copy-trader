@@ -219,10 +219,9 @@ class CopyTradeAgent:
             raise ValueError(
                 "Wallet private key not set. Call set_wallet_private_key() first."
             )
-
-        await self.trade_executer.execute_trades(
-            trades, self.wallet_address, self.wallet_private_key
-        )
+        self.trade_executer.set_wallet_address(self.wallet_address)
+        self.trade_executer.set_wallet_private_key(self.wallet_private_key)
+        return await self.trade_executer.execute_trades(trades)
 
 
 async def main():
@@ -234,25 +233,26 @@ async def main():
             ],
         )
     ]
-    # Initialize agent with Solana mainnet RPC URL
-    agent = CopyTradeAgent(
-        rpc_url="https://api.mainnet-beta.solana.com", token_aliases=token_aliases
-    )
-
-    # Set wallet from environment variables
-    has_private_key = False
-    if private_key := os.getenv("WALLET_PRIVATE_KEY"):
-        agent.set_wallet_private_key(private_key)
-        has_private_key = True
-    elif wallet_address := os.getenv("WALLET_ADDRESS"):
-        agent.set_wallet_address(wallet_address)
-    else:
-        raise ValueError("Either WALLET_PRIVATE_KEY or WALLET_ADDRESS must be set")
-
-    # Initialize components
-    await agent.initialize()
-
+    agent = None
     try:
+        # Initialize agent with Solana mainnet RPC URL
+        agent = CopyTradeAgent(
+            rpc_url="https://api.mainnet-beta.solana.com", token_aliases=token_aliases
+        )
+
+        # Set wallet from environment variables
+        has_private_key = False
+        if private_key := os.getenv("WALLET_PRIVATE_KEY"):
+            agent.set_wallet_private_key(private_key)
+            has_private_key = True
+        elif wallet_address := os.getenv("WALLET_ADDRESS"):
+            agent.set_wallet_address(wallet_address)
+        else:
+            raise ValueError("Either WALLET_PRIVATE_KEY or WALLET_ADDRESS must be set")
+
+        # Initialize components
+        await agent.initialize()
+
         # Get current portfolio
         logger.info("Getting current portfolio...")
         current_portfolio = await agent.get_wallet_portfolio(agent.wallet_address)
@@ -264,11 +264,11 @@ async def main():
             key=lambda x: float(x.usd_value),
             reverse=True,
         )
+
         for balance in sorted_balances:
-            if float(balance.usd_value) >= 1:
-                logger.info(
-                    f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {balance.weight:6.2%}"
-                )
+            logger.info(
+                f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f})"
+            )
 
         # Get source portfolio
         logger.info("Analyzing source portfolio...")
@@ -286,15 +286,18 @@ async def main():
             reverse=True,
         )
         for balance in sorted_balances:
-            if float(balance.usd_value) >= 1:
-                logger.info(
-                    f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {balance.weight:6.2%}"
-                )
+            logger.info(
+                f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f})"
+            )
 
         # Create trade plan
         logger.info("Creating trade plan...")
         trades = await agent.create_trade_plan(current_portfolio, target_portfolio)
-        logger.info(f"Generated {len(trades)} trades")
+        if not trades:
+            logger.info("No trades needed")
+            return
+
+        logger.info("Planned trades:")
         for trade in trades:
             if trade.type == "swap":
                 logger.info(
@@ -306,17 +309,35 @@ async def main():
         # Execute trades only if private key is set
         if trades and has_private_key:
             logger.info("Executing trades...")
-            await agent.execute_trades(trades)
+            results = await agent.execute_trades(trades)
+            for trade, result in zip(trades, results):
+                if not result.success:
+                    logger.error(
+                        f"Trade failed: {trade.from_symbol} -> {trade.to_symbol}: {result.error_message}"
+                    )
         elif trades:
             logger.info(
                 "Skipping trade execution because WALLET_PRIVATE_KEY is not set"
             )
 
+    except ValueError as e:
+        logger.exception(f"Configuration error: {e}")
+        raise SystemExit(1)
     except Exception as e:
-        logger.error(f"Error in main: {e}")
+        logger.exception(f"Error in main: {e}")
+        raise SystemExit(1)
     finally:
-        await agent.close()
+        if agent:
+            await agent.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except SystemExit as e:
+        raise e
+    except KeyboardInterrupt:
+        logger.info("Process interrupted by user")
+    except Exception as e:
+        logger.exception(f"Unhandled error: {e}")
+        raise SystemExit(1)

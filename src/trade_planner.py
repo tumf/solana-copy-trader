@@ -32,8 +32,11 @@ class TradePlanner:
                     self.token_replacement_map[replaceable_token] = alias.address
 
     def resolve_address(self, address: str) -> str:
-        """トークンの置換が設定されている場合は置換先のアドレスに変換する
-        例: USDT -> USDC"""
+        """Resolve token address using replacement map"""
+        # Base58 encoded Solana addresses are typically 32-44 characters
+        # If longer, it's likely a signature data, so return it unchanged
+        if len(address) > 44:
+            return address
         return self.token_replacement_map.get(address, address)
 
     async def initialize(self):
@@ -142,9 +145,11 @@ class TradePlanner:
                             from_symbol=symbol,
                             from_mint=resolved_mint,  # 置換後のアドレスを使用
                             from_amount=current.amount,
+                            from_decimals=current.decimals,
                             to_symbol="USDC",
                             to_mint=USDC_MINT,  # 直接USDC_MINTを使用
                             to_amount=current.usd_value,  # USDCは1:1
+                            to_decimals=6,
                             usd_value=current.usd_value,
                         )
                     )
@@ -163,15 +168,29 @@ class TradePlanner:
                 # 買い注文：USDCからのスワップ
                 trade_value = current_total * (target_weight - current_weight)
                 batch_amount = trade_value / price if price > 0 else Decimal(0)
+
+                # トークン情報が取得できない場合はスキップ
+                if not current and not target:
+                    logger.warning(f"Skipping buy trade for {symbol}: No token information available")
+                    continue
+
+                # decimalsはcurrentかtargetから取得
+                token_decimals = (current and current.decimals) or (target and target.decimals)
+                if not token_decimals:
+                    logger.warning(f"Skipping buy trade for {symbol}: Could not determine token decimals")
+                    continue
+
                 buy_trades.append(
                     SwapTrade(
                         type="swap",
                         from_symbol="USDC",
                         from_mint=USDC_MINT,  # 直接USDC_MINTを使用
                         from_amount=trade_value,  # USDCは1:1
+                        from_decimals=6,  # USDCは常に6 decimals
                         to_symbol=symbol,
                         to_mint=resolved_mint,  # 置換後のアドレスを使用
                         to_amount=batch_amount,
+                        to_decimals=token_decimals,
                         usd_value=trade_value,
                     )
                 )
@@ -179,15 +198,29 @@ class TradePlanner:
                 # 売り注文：USDCへのスワップ
                 trade_value = current_total * (current_weight - target_weight)
                 batch_amount = trade_value / price if price > 0 else Decimal(0)
+
+                # トークン情報が取得できない場合はスキップ
+                if not current:
+                    logger.warning(f"Skipping sell trade for {symbol}: No token information available")
+                    continue
+
+                # decimalsを取得
+                token_decimals = current.decimals
+                if not token_decimals:
+                    logger.warning(f"Skipping sell trade for {symbol}: Could not determine token decimals")
+                    continue
+
                 sell_trades.append(
                     SwapTrade(
                         type="swap",
                         from_symbol=symbol,
                         from_mint=resolved_mint,  # 置換後のアドレスを使用
                         from_amount=batch_amount,
+                        from_decimals=token_decimals,
                         to_symbol="USDC",
                         to_mint=USDC_MINT,  # 直接USDC_MINTを使用
                         to_amount=trade_value,  # USDCは1:1
+                        to_decimals=6,  # USDCは常に6 decimals
                         usd_value=trade_value,
                     )
                 )
@@ -223,9 +256,11 @@ class TradePlanner:
                                     from_symbol=sell.from_symbol,
                                     from_mint=self.resolve_address(sell.from_mint),
                                     from_amount=sell.from_amount * sell_ratio,
+                                    from_decimals=sell.from_decimals,  # 売り注文のdecimals
                                     to_symbol=buy.to_symbol,
                                     to_mint=self.resolve_address(buy.to_mint),
                                     to_amount=buy.to_amount * buy_ratio,
+                                    to_decimals=buy.to_decimals,  # 買い注文のdecimals
                                     usd_value=match_value,
                                 )
                             )
@@ -240,9 +275,11 @@ class TradePlanner:
                                         from_symbol=sell.from_symbol,
                                         from_mint=self.resolve_address(sell.from_mint),
                                         from_amount=sell.from_amount * remaining_ratio,
+                                        from_decimals=sell.from_decimals,  # 売り注文のdecimals
                                         to_symbol=sell.to_symbol,
                                         to_mint=self.resolve_address(sell.to_mint),
                                         to_amount=sell.to_amount * remaining_ratio,
+                                        to_decimals=6,  # USDCは常に6 decimals
                                         usd_value=remaining_value,
                                     )
                                 )
@@ -256,9 +293,11 @@ class TradePlanner:
                                         from_symbol=buy.from_symbol,
                                         from_mint=self.resolve_address(buy.from_mint),
                                         from_amount=buy.from_amount * remaining_ratio,
+                                        from_decimals=6,  # USDCは常に6 decimals
                                         to_symbol=buy.to_symbol,
                                         to_mint=self.resolve_address(buy.to_mint),
                                         to_amount=buy.to_amount * remaining_ratio,
+                                        to_decimals=buy.to_decimals,  # 買い注文のdecimals
                                         usd_value=remaining_value,
                                     )
                                 )
@@ -290,16 +329,27 @@ class TradePlanner:
 
         # 最初のパスで取引を集約
         for trade in trades:
-            pair_key = f"{trade.from_mint}->{trade.to_mint}"
+            # Validate addresses before processing
+            from_mint = self.resolve_address(trade.from_mint)
+            to_mint = self.resolve_address(trade.to_mint)
+            
+            # Skip trades with invalid addresses (longer than 44 chars)
+            if len(from_mint) > 44 or len(to_mint) > 44:
+                logger.warning(f"Skipping trade with invalid addresses: {trade.from_symbol} -> {trade.to_symbol}")
+                continue
+                
+            pair_key = f"{from_mint}->{to_mint}"
             if pair_key not in pair_trades:
                 pair_trades[pair_key] = SwapTrade(
                     type="swap",
                     from_symbol=trade.from_symbol,
-                    from_mint=trade.from_mint,
+                    from_mint=from_mint,
                     from_amount=Decimal(0),
+                    from_decimals=trade.from_decimals,
                     to_symbol=trade.to_symbol,
-                    to_mint=trade.to_mint,
+                    to_mint=to_mint,
                     to_amount=Decimal(0),
+                    to_decimals=trade.to_decimals,
                     usd_value=Decimal(0),
                 )
 
@@ -308,21 +358,27 @@ class TradePlanner:
             pair_trades[pair_key].usd_value += trade.usd_value
 
             # 中間トークンを使用する取引を記録
-            if trade.to_mint == USDC_MINT:
-                from_key = trade.from_mint
-                if from_key not in intermediate_trades:
-                    intermediate_trades[from_key] = []
-                intermediate_trades[from_key].append(pair_trades[pair_key])
-            elif trade.from_mint == USDC_MINT:
-                to_key = trade.to_mint
-                if to_key not in intermediate_trades:
-                    intermediate_trades[to_key] = []
-                intermediate_trades[to_key].append(pair_trades[pair_key])
+            if to_mint == USDC_MINT:
+                if from_mint not in intermediate_trades:
+                    intermediate_trades[from_mint] = []
+                intermediate_trades[from_mint].append(pair_trades[pair_key])
+            elif from_mint == USDC_MINT:
+                if to_mint not in intermediate_trades:
+                    intermediate_trades[to_mint] = []
+                intermediate_trades[to_mint].append(pair_trades[pair_key])
 
         # 中間トークンを使用する取引を直接取引に変換
         optimized_pairs: Dict[str, SwapTrade] = {}
         for from_mint, from_trades in intermediate_trades.items():
+            # Skip invalid addresses
+            if len(from_mint) > 44:
+                continue
+                
             for to_mint, to_trades in intermediate_trades.items():
+                # Skip invalid addresses
+                if len(to_mint) > 44:
+                    continue
+                    
                 if from_mint != to_mint:
                     # 同じ中間トークンを使用する取引ペアを見つける
                     for from_trade in from_trades:
@@ -346,9 +402,11 @@ class TradePlanner:
                                             from_symbol=from_trade.from_symbol,
                                             from_mint=from_mint,
                                             from_amount=Decimal(0),
+                                            from_decimals=from_trade.from_decimals,
                                             to_symbol=to_trade.to_symbol,
                                             to_mint=to_mint,
                                             to_amount=Decimal(0),
+                                            to_decimals=to_trade.to_decimals,
                                             usd_value=Decimal(0),
                                         )
 
@@ -379,6 +437,10 @@ class TradePlanner:
         # 残りの取引を追加
         for trade in pair_trades.values():
             if trade.usd_value >= self.risk_config.min_trade_size_usd:
+                # Skip trades with invalid addresses
+                if len(trade.from_mint) > 44 or len(trade.to_mint) > 44:
+                    continue
+                    
                 pair_key = f"{trade.from_mint}->{trade.to_mint}"
                 if pair_key not in optimized_pairs:
                     optimized_pairs[pair_key] = trade
@@ -391,6 +453,10 @@ class TradePlanner:
         optimized_trades: List[Trade] = []
         for trade in optimized_pairs.values():
             if trade.usd_value < self.risk_config.min_trade_size_usd:
+                continue
+
+            # Final validation of addresses
+            if len(trade.from_mint) > 44 or len(trade.to_mint) > 44:
                 continue
 
             remaining_value = trade.usd_value
@@ -406,9 +472,11 @@ class TradePlanner:
                         from_symbol=trade.from_symbol,
                         from_mint=trade.from_mint,
                         from_amount=trade.from_amount * ratio,
+                        from_decimals=trade.from_decimals,
                         to_symbol=trade.to_symbol,
                         to_mint=trade.to_mint,
                         to_amount=trade.to_amount * ratio,
+                        to_decimals=trade.to_decimals,
                         usd_value=batch_value,
                     )
                 )

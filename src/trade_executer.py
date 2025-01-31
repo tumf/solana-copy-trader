@@ -1,6 +1,7 @@
 import asyncio
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict
+import logging
 
 from solana.rpc.async_api import AsyncClient
 from solders.pubkey import Pubkey  # type: ignore
@@ -8,8 +9,9 @@ from solders.pubkey import Pubkey  # type: ignore
 from dex.base import SwapQuote, SwapResult
 from jupiter import JupiterClient
 from logger import logger
-from models import RiskConfig, SwapTrade
+from models import RiskConfig, SwapTrade, Token
 from network import USDC_MINT
+import aiohttp
 
 logger = logger.bind(name="trade_executer")
 
@@ -21,6 +23,14 @@ class TradeExecuter:
         self.client = AsyncClient(rpc_url)
         self.max_slippage_bps = risk_config.max_slippage_bps
         self.jupiter_client = JupiterClient(rpc_url=self.rpc_url)
+        self.wallet_address = None
+        self.wallet_private_key = None
+
+    def set_wallet_address(self, wallet_address: str):
+        self.wallet_address = Pubkey.from_string(wallet_address)
+
+    def set_wallet_private_key(self, wallet_private_key: str):
+        self.wallet_private_key = wallet_private_key
 
     async def initialize(self):
         """Initialize trade executer"""
@@ -37,103 +47,123 @@ class TradeExecuter:
             await asyncio.sleep(0.1)  # Give time for the session to close properly
             self.jupiter_client = None
 
-    async def get_best_quote(
-        self,
-        input_mint: str,
-        output_mint: str,
-        amount: int,
-        slippage_bps: Optional[int] = None,
-    ) -> Optional[SwapQuote]:
-        """Get the best quote from Jupiter"""
-        try:
-            quote = await self.jupiter_client.get_quote(
-                input_mint, output_mint, amount, slippage_bps or self.max_slippage_bps
+    async def get_quote(self, trade: SwapTrade) -> dict:
+        """Get best quote for a swap"""
+        # Validate addresses - Base58 encoded Solana addresses are 44 chars or less
+        if len(trade.from_mint) > 44 or len(trade.to_mint) > 44:
+            error_msg = (
+                f"Invalid token address for {trade.from_symbol} -> {trade.to_symbol}"
             )
-            return quote
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
+        # Get quote from Jupiter API
+        params = {
+            "inputMint": trade.from_mint,
+            "outputMint": trade.to_mint,
+            "amount": trade.from_amount_lamports,
+            "slippageBps": self.max_slippage_bps,
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                self.jupiter_client.quote_url + "/quote", params=params
+            ) as response:
+                if response.status != 200:
+                    error_msg = f"Failed to get quote: {response.status} {await response.text()}"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+                return await response.json()
+
+    async def execute_swap_with_retry(self, trade: SwapTrade) -> SwapResult:
+        try:
+            amount_lamports = int(trade.from_amount * 10**trade.from_decimals)
+
+            # Get quote
+            quote = await self.jupiter_client.get_quote(
+                input_mint=trade.from_mint,
+                output_mint=trade.to_mint,
+                amount=amount_lamports,
+            )
+            if not quote:
+                return SwapResult(
+                    success=False,
+                    tx_signature=None,
+                    error_message="Failed to get quote",
+                )
+
+            # Execute swap
+            result = await self.jupiter_client.execute_swap(
+                quote=quote,
+                wallet_address=self.wallet_address,
+                wallet_private_key=self.wallet_private_key,
+            )
+
+            if result.success:
+                return result
+            else:
+                return SwapResult(
+                    success=False,
+                    tx_signature=None,
+                    error_message=result.error_message,
+                )
+
         except Exception as e:
-            logger.debug(f"Failed to get quote: {e}")
-            return None
-
-    async def execute_swap_with_retry(
-        self,
-        quote: SwapQuote,
-        wallet_address: str,
-        wallet_private_key: str,
-        max_retries: int = 3,
-    ) -> SwapResult:
-        """Execute swap with retry logic"""
-        for attempt in range(max_retries):
-            try:
-                result = await self.jupiter_client.execute_swap(
-                    quote, Pubkey.from_string(wallet_address), wallet_private_key
-                )
-                if result.success:
-                    return result
-                logger.warning(
-                    f"Swap attempt {attempt + 1} failed: {result.error_message}"
-                )
-                await asyncio.sleep(1)
-            except Exception as e:
-                logger.warning(f"Swap attempt {attempt + 1} failed: {e}")
-                await asyncio.sleep(1)
-
-        return SwapResult(
-            success=False, tx_signature=None, error_message="Max retries exceeded"
-        )
+            return SwapResult(
+                success=False,
+                tx_signature=None,
+                error_message=str(e),
+            )
 
     async def get_token_price(self, mint: str) -> Decimal:
         """Get token price from Jupiter"""
-        try:
-            if mint == USDC_MINT:
-                return Decimal(1)  # USDC is our price reference
+        if mint == USDC_MINT:
+            return Decimal(1)  # USDC is our price reference
 
+        try:
             # Try Jupiter
             prices = await self.jupiter_client.get_token_price_by_ids([mint])
             if mint in prices:
                 return prices[mint]
+            raise ValueError(f"Price not found for token {mint}")
 
         except Exception as e:
-            logger.warning(f"Failed to get price for {mint}: {e}")
+            logger.exception(f"Failed to get price for {mint}: {e}")
+            raise  # Re-raise to let caller handle the error
 
-        return Decimal(0)  # Return 0 if price not available
-
-    async def execute_trades(
-        self, trades: List[SwapTrade], wallet_address: str, wallet_private_key: str
-    ):
-        """Execute trades using the best available DEX"""
+    async def execute_trades(self, trades: List[SwapTrade]) -> List[SwapResult]:
+        results = []
         for trade in trades:
             try:
-                token_amount = int(trade.from_amount)
-                quote = await self.get_best_quote(
-                    trade.from_mint, trade.to_mint, token_amount
-                )
-                if quote:
-                    result = await self.execute_swap_with_retry(
-                        quote, wallet_address, wallet_private_key
+                quote = await self.get_quote(trade)
+                result = await self.execute_swap_with_retry(trade)
+                if result.success:
+                    logger.info(
+                        f"Swapped {trade.from_symbol} for {trade.to_symbol} (${trade.usd_value}): {result.tx_signature}"
                     )
-                    if result.success:
-                        logger.info(
-                            f"Swapped {trade.from_symbol} for {trade.to_symbol} (${trade.usd_value}) using {quote.dex_name}: {result.tx_signature}"
-                        )
-                    else:
-                        logger.error(
-                            f"Failed to swap {trade.from_symbol} to {trade.to_symbol}: {result.error_message}"
-                        )
                 else:
-                    logger.error(
-                        f"No quotes available for swapping {trade.from_symbol} to {trade.to_symbol}"
+                    raise RuntimeError(
+                        f"Failed to execute trade {trade.from_symbol} -> {trade.to_symbol}: {result.error_message}"
                     )
-
-                # Wait between trades to avoid rate limits
-                await asyncio.sleep(1)
-
+                results.append(result)
             except Exception as e:
-                logger.error(f"Failed to execute trade: {e}")
+                logger.exception(
+                    f"Failed to execute trade {trade.from_symbol} -> {trade.to_symbol}: {str(e)}"
+                )
+                results.append(
+                    SwapResult(
+                        success=False,
+                        tx_signature=None,
+                        error_message=str(e),
+                    )
+                )
+        return results
 
 
 async def main():
     # Initialize trade executer with Solana mainnet RPC URL
-    trade_executer = TradeExecuter("https://api.mainnet-beta.solana.com", 100)
+    trade_executer = TradeExecuter(
+        "https://api.mainnet-beta.solana.com", RiskConfig(max_slippage_bps=100)
+    )
     await trade_executer.initialize()
 
     # Example trades
@@ -143,9 +173,11 @@ async def main():
             from_symbol="SOL",
             from_mint="So11111111111111111111111111111111111111112",
             from_amount=Decimal("0.1"),
+            from_decimals=9,
             to_symbol="USDC",
             to_mint=USDC_MINT,
             to_amount=Decimal("2"),
+            to_decimals=6,
             usd_value=Decimal("2"),
         ),
     ]

@@ -3,26 +3,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
-
+from models import SwapQuote, SwapResult
 import aiohttp
 
-
-@dataclass
-class SwapQuote:
-    input_mint: str
-    output_mint: str
-    input_amount: int
-    expected_output_amount: int
-    price_impact_pct: Decimal
-    minimum_output_amount: int
-    dex_name: str
-
-
-@dataclass
-class SwapResult:
-    success: bool
-    tx_signature: Optional[str]
-    error_message: Optional[str] = None
 
 
 class MockAsyncClient:

@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import DateTime, Integer, String
@@ -31,11 +31,17 @@ class SwapTrade(BaseModel):
     from_symbol: str
     from_mint: str
     from_amount: Decimal
+    from_decimals: int
     to_symbol: str
     to_mint: str
     to_amount: Decimal
+    to_decimals: int
     usd_value: Decimal
     matched: bool = False
+
+    @property
+    def from_amount_lamports(self) -> int:
+        return int(self.from_amount * 10**self.from_decimals)
 
 
 Trade = SwapTrade
@@ -85,9 +91,19 @@ class TokenAlias(BaseModel):
     aliases: List[str]
 
 
+class SwapQuote(BaseModel):
+    input_mint: str
+    output_mint: str
+    input_amount: int
+    expected_output_amount: int
+    price_impact_pct: Decimal
+    minimum_output_amount: int
+    dex_name: str
+
+
 class SwapResult(BaseModel):
-    """スワップ取引の結果"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     success: bool
-    tx_signature: str | None
-    error_message: str | None
+    tx_signature: Optional[str]
+    error_message: Optional[str] = None
