@@ -1,6 +1,6 @@
 import asyncio
 from decimal import Decimal
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import aiohttp
 from loguru import logger
@@ -11,10 +11,11 @@ logger = logger.bind(name="jupiter")
 
 
 class JupiterClient:
-    def __init__(self, rpc_url: str):
+    def __init__(self, rpc_url: Optional[str] = None):
         self.rpc_url = rpc_url
         self.session = None
         self.price_url = "https://api.jup.ag/price/v2"
+        self.quote_url = "https://api.jup.ag/swap/v1"
         self.headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
     async def initialize(self):
