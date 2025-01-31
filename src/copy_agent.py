@@ -6,8 +6,8 @@ from typing import Dict, List, Optional
 
 import base58
 from solana.rpc.async_api import AsyncClient
-from solders.keypair import Keypair
-from solders.pubkey import Pubkey
+from solders.keypair import Keypair  # type: ignore
+from solders.pubkey import Pubkey  # type: ignore
 
 from logger import logger
 from models import TokenAlias, Trade
