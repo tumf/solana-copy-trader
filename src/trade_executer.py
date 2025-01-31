@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 from solana.rpc.async_api import AsyncClient
-from solders.pubkey import Pubkey
+from solders.pubkey import Pubkey  # type: ignore
 
 from dex.base import SwapQuote, SwapResult
 from jupiter import JupiterClient
