@@ -57,7 +57,7 @@ class CopyTradeAgent:
         """Set wallet private key for trade execution"""
         try:
             private_key_bytes = base58.b58decode(private_key)
-            keypair = Keypair.from_seed(private_key_bytes)
+            keypair = Keypair.from_seed(private_key_bytes[:32])
             self.wallet_private_key = private_key
             self.wallet_address = str(keypair.pubkey())
         except Exception as e:
