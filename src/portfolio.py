@@ -4,9 +4,12 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, Optional
 
+from solders.pubkey import Pubkey  # type: ignore
+
 from logger import logger
 from token_price_resolver import TokenPriceResolver
 from token_resolver import TokenResolver
+from network import SOL_MINT
 
 # Set logger name for this module
 logger = logger.bind(name="portfolio")
@@ -98,12 +101,30 @@ class PortfolioAnalyzer:
             token_accounts = await self.token_resolver.get_token_accounts(
                 wallet_address
             )
-            if not token_accounts:
+
+            # Get SOL balance
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getBalance",
+                "params": [wallet_address],
+            }
+            session = await self.token_resolver.ensure_session()
+            async with session.post(self.token_resolver.rpc_url, json=payload) as response:
+                data = await response.json()
+                if "error" in data:
+                    raise Exception(f"RPC error: {data['error']}")
+                sol_lamports = data["result"]["value"]
+                sol_balance = Decimal(str(sol_lamports)) / Decimal(10**9)
+                logger.debug(f"SOL balance: {sol_balance}")
+
+            if not token_accounts and sol_balance == 0:
                 logger.info(f"No token accounts found for {wallet_address}")
                 return Portfolio(total_value_usd=Decimal("0"), token_balances={})
 
-            # Get all token mints
+            # Get all token mints including SOL
             mints = [account.mint for account in token_accounts if account.amount > 0]
+            mints.append(SOL_MINT)
             logger.debug(f"Found {len(mints)} active token accounts")
 
             # Create portfolio entries
@@ -115,8 +136,22 @@ class PortfolioAnalyzer:
                 for account in token_accounts
                 if account.amount > 0
             ]
+            active_mints.append(SOL_MINT)
             prices = await self.token_price_resolver.get_token_prices(active_mints)
 
+            # Add SOL balance
+            sol_price = prices.get(SOL_MINT, Decimal(0))
+            sol_usd_value = sol_balance * sol_price
+            total_value_usd += sol_usd_value
+            token_balances[SOL_MINT] = TokenBalance(
+                mint=SOL_MINT,
+                amount=sol_balance,
+                decimals=9,
+                usd_value=sol_usd_value,
+                symbol="SOL",
+            )
+
+            # Process other token accounts
             for account in token_accounts:
                 if account.amount == 0:
                     continue
