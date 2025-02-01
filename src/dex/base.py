@@ -1,11 +1,9 @@
 import asyncio
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from decimal import Decimal
-from typing import Optional
-from models import SwapQuote, SwapResult
+
 import aiohttp
 
+from models import SwapQuote, SwapResult
 
 
 class MockAsyncClient:

@@ -1,13 +1,14 @@
 import asyncio
+import base64
 from decimal import Decimal
 from typing import Dict, List, Optional
+
 import aiohttp
 from loguru import logger
-import base64
 from solders.keypair import Keypair  # type: ignore
-from solders.transaction import VersionedTransaction  # type: ignore
 from solders.message import to_bytes_versioned  # type: ignore
-import base58
+from solders.transaction import VersionedTransaction  # type: ignore
+
 from models import SwapResult
 
 # Jupiter API limits
@@ -136,6 +137,7 @@ class JupiterClient:
 
         except Exception as e:
             logger.exception(f"Error getting quote: {e}")
+            return None
 
     async def build_swap_transaction(
         self, quote: Dict, wallet_address: str
@@ -233,19 +235,11 @@ class JupiterClient:
                     logger.error(f"Error from Solana RPC: {data['error']}")
                     return None
 
-                return {
-                    "success": True,
-                    "txid": data["result"],
-                    "error": None
-                }
+                return {"success": True, "txid": data["result"], "error": None}
 
         except Exception as e:
             logger.exception(f"Error signing and sending transaction: {e}")
-            return {
-                "success": False,
-                "txid": None,
-                "error": str(e)
-            }
+            return {"success": False, "txid": None, "error": str(e)}
 
     async def execute_swap(
         self,
@@ -270,7 +264,7 @@ class JupiterClient:
                 return SwapResult(
                     success=False,
                     tx_signature=None,
-                    error_message="Failed to build transaction"
+                    error_message="Failed to build transaction",
                 )
 
             # Sign and send transaction
@@ -279,19 +273,15 @@ class JupiterClient:
                 return SwapResult(
                     success=False,
                     tx_signature=None,
-                    error_message="Failed to sign and send transaction"
+                    error_message="Failed to sign and send transaction",
                 )
 
             return SwapResult(
                 success=result["success"],
                 tx_signature=result["txid"],
-                error_message=result.get("error")
+                error_message=result.get("error"),
             )
 
         except Exception as e:
             logger.exception(f"Error executing swap: {e}")
-            return SwapResult(
-                success=False,
-                tx_signature=None,
-                error_message=str(e)
-            )
+            return SwapResult(success=False, tx_signature=None, error_message=str(e))

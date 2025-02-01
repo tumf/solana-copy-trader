@@ -54,7 +54,9 @@ class BirdEyeClient:
             async with session.get(url, params=params) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    raise ValueError(f"Failed to get price (HTTP {response.status}): {error_text}")
+                    raise ValueError(
+                        f"Failed to get price (HTTP {response.status}): {error_text}"
+                    )
 
                 data = await response.json()
                 if not data.get("success"):
@@ -62,7 +64,9 @@ class BirdEyeClient:
 
                 price = data.get("data", {}).get("value")
                 if price is None:
-                    raise ValueError(f"No price data available for token {token_address}")
+                    raise ValueError(
+                        f"No price data available for token {token_address}"
+                    )
 
                 return Decimal(str(price))
         except (aiohttp.ClientError, ValueError) as e:

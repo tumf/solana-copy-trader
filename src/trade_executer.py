@@ -1,17 +1,15 @@
 import asyncio
 from decimal import Decimal
-from typing import List, Optional, Dict
-import logging
+from typing import List, Optional
 
+import aiohttp
 from solana.rpc.async_api import AsyncClient
-from solders.pubkey import Pubkey  # type: ignore
 
-from dex.base import SwapQuote, SwapResult
+from dex.base import SwapResult
 from jupiter import JupiterClient
 from logger import logger
-from models import RiskConfig, SwapTrade, Token
+from models import RiskConfig, SwapTrade
 from network import USDC_MINT
-import aiohttp
 
 logger = logger.bind(name="trade_executer")
 
@@ -23,13 +21,15 @@ class TradeExecuter:
         self.client = AsyncClient(rpc_url)
         self.max_slippage_bps = risk_config.max_slippage_bps
         self.jupiter_client = JupiterClient(rpc_url=self.rpc_url)
-        self.wallet_address = None
-        self.wallet_private_key = None
+        self.wallet_address: Optional[str] = None
+        self.wallet_private_key: Optional[str] = None
 
     def set_wallet_address(self, wallet_address: str):
-        self.wallet_address = Pubkey.from_string(wallet_address)
+        """Set wallet address for trade execution"""
+        self.wallet_address = wallet_address
 
     def set_wallet_private_key(self, wallet_private_key: str):
+        """Set wallet private key for trade execution"""
         self.wallet_private_key = wallet_private_key
 
     async def initialize(self):
@@ -134,7 +134,6 @@ class TradeExecuter:
         results = []
         for trade in trades:
             try:
-                quote = await self.get_quote(trade)
                 result = await self.execute_swap_with_retry(trade)
                 if result.success:
                     logger.info(

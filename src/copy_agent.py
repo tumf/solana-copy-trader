@@ -118,7 +118,7 @@ class CopyTradeAgent:
             try:
                 portfolio = await self.get_wallet_portfolio(address)
                 portfolios[address] = portfolio
-
+                return portfolio
                 # Display portfolio summary
                 logger.info(f"Portfolio for {address}:")
                 logger.info(f"Total value: ${portfolio.total_value_usd:,.2f}")
@@ -127,11 +127,11 @@ class CopyTradeAgent:
                     key=lambda x: float(x.usd_value),
                     reverse=True,
                 )
-                # for balance in sorted_balances:
-                #     if float(balance.usd_value) >= 1:
-                #         logger.info(
-                #             f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {balance.weight:6.2%}"
-                #         )
+                for balance in sorted_balances:
+                    if float(balance.usd_value) >= 1:
+                        logger.info(
+                            f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {balance.weight:6.2%}"
+                        )
 
             except Exception as e:
                 logger.warning(f"Failed to get portfolio for {address}: {e}")
@@ -189,7 +189,9 @@ class CopyTradeAgent:
         # Remove tokens with value less than minimum trade size
         for mint in list(token_balances.keys()):
             if token_balances[mint].usd_value < self.risk_config.min_trade_size_usd:
-                logger.debug(f"Removing {token_balances[mint].symbol} due to small value: ${token_balances[mint].usd_value}")
+                logger.debug(
+                    f"Removing {token_balances[mint].symbol} due to small value: ${token_balances[mint].usd_value}"
+                )
                 del token_balances[mint]
 
         # Apply max allocation limit

@@ -4,12 +4,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, Optional
 
-from solders.pubkey import Pubkey  # type: ignore
-
 from logger import logger
+from network import SOL_MINT
 from token_price_resolver import TokenPriceResolver
 from token_resolver import TokenResolver
-from network import SOL_MINT
 
 # Set logger name for this module
 logger = logger.bind(name="portfolio")
@@ -110,7 +108,9 @@ class PortfolioAnalyzer:
                 "params": [wallet_address],
             }
             session = await self.token_resolver.ensure_session()
-            async with session.post(self.token_resolver.rpc_url, json=payload) as response:
+            async with session.post(
+                self.token_resolver.rpc_url, json=payload
+            ) as response:
                 data = await response.json()
                 if "error" in data:
                     raise Exception(f"RPC error: {data['error']}")

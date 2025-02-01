@@ -38,6 +38,8 @@ async def agent(risk_config):
     )
     # Mock trade_executer
     agent.trade_executer = AsyncMock()
+    agent.trade_executer.set_wallet_address = MagicMock()
+    agent.trade_executer.set_wallet_private_key = MagicMock()
     agent.trade_executer.dexes = [AsyncMock(), AsyncMock(), AsyncMock(), AsyncMock()]
     # Initialize token metadata for testing
     agent.token_metadata = {
@@ -257,9 +259,11 @@ async def test_execute_trades(agent):
                 from_symbol="Token1",
                 from_mint="token1",
                 from_amount=Decimal("100"),
+                from_decimals=6,
                 to_symbol="Token2",
                 to_mint="token2",
                 to_amount=Decimal("95"),
+                to_decimals=6,
                 usd_value=Decimal("100"),
             )
         ]

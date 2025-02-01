@@ -171,13 +171,19 @@ class TradePlanner:
 
                 # トークン情報が取得できない場合はスキップ
                 if not current and not target:
-                    logger.warning(f"Skipping buy trade for {symbol}: No token information available")
+                    logger.warning(
+                        f"Skipping buy trade for {symbol}: No token information available"
+                    )
                     continue
 
                 # decimalsはcurrentかtargetから取得
-                token_decimals = (current and current.decimals) or (target and target.decimals)
+                token_decimals = (current and current.decimals) or (
+                    target and target.decimals
+                )
                 if not token_decimals:
-                    logger.warning(f"Skipping buy trade for {symbol}: Could not determine token decimals")
+                    logger.warning(
+                        f"Skipping buy trade for {symbol}: Could not determine token decimals"
+                    )
                     continue
 
                 buy_trades.append(
@@ -201,13 +207,17 @@ class TradePlanner:
 
                 # トークン情報が取得できない場合はスキップ
                 if not current:
-                    logger.warning(f"Skipping sell trade for {symbol}: No token information available")
+                    logger.warning(
+                        f"Skipping sell trade for {symbol}: No token information available"
+                    )
                     continue
 
                 # decimalsを取得
                 token_decimals = current.decimals
                 if not token_decimals:
-                    logger.warning(f"Skipping sell trade for {symbol}: Could not determine token decimals")
+                    logger.warning(
+                        f"Skipping sell trade for {symbol}: Could not determine token decimals"
+                    )
                     continue
 
                 sell_trades.append(
@@ -332,12 +342,14 @@ class TradePlanner:
             # Validate addresses before processing
             from_mint = self.resolve_address(trade.from_mint)
             to_mint = self.resolve_address(trade.to_mint)
-            
+
             # Skip trades with invalid addresses (longer than 44 chars)
             if len(from_mint) > 44 or len(to_mint) > 44:
-                logger.warning(f"Skipping trade with invalid addresses: {trade.from_symbol} -> {trade.to_symbol}")
+                logger.warning(
+                    f"Skipping trade with invalid addresses: {trade.from_symbol} -> {trade.to_symbol}"
+                )
                 continue
-                
+
             pair_key = f"{from_mint}->{to_mint}"
             if pair_key not in pair_trades:
                 pair_trades[pair_key] = SwapTrade(
@@ -373,12 +385,12 @@ class TradePlanner:
             # Skip invalid addresses
             if len(from_mint) > 44:
                 continue
-                
+
             for to_mint, to_trades in intermediate_trades.items():
                 # Skip invalid addresses
                 if len(to_mint) > 44:
                     continue
-                    
+
                 if from_mint != to_mint:
                     # 同じ中間トークンを使用する取引ペアを見つける
                     for from_trade in from_trades:
@@ -440,7 +452,7 @@ class TradePlanner:
                 # Skip trades with invalid addresses
                 if len(trade.from_mint) > 44 or len(trade.to_mint) > 44:
                     continue
-                    
+
                 pair_key = f"{trade.from_mint}->{trade.to_mint}"
                 if pair_key not in optimized_pairs:
                     optimized_pairs[pair_key] = trade

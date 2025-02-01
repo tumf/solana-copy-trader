@@ -89,3 +89,27 @@ omit = [
     "setup.py",
 ]
 
+[tool.mypy]
+# 基本設定
+python_version = "3.12"
+warn_return_any = false  # Any型の戻り値を許可
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = false
+
+# サードパーティライブラリの型チェックを無視
+ignore_missing_imports = true
+
+# 重要度の低い警告を無視
+disable_error_code = [
+    "import-untyped",  # 型情報のないモジュールのインポートを無視
+    "annotation-unchecked",  # 型アノテーションのない関数のチェックを無視
+    "no-any-return",  # Any型の戻り値を無視
+]
+
+# 特定のモジュールを型チェックから除外
+exclude = [
+    "tests/",  # テストコードは型チェックから除外
+    "migrations/",  # マイグレーションファイルは型チェックから除外
+]
+
