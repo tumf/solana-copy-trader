@@ -9,7 +9,7 @@ from dex.base import SwapResult
 from jupiter import JupiterClient
 from logger import logger
 from models import RiskConfig, SwapTrade
-from network import USDC_MINT
+from network.solana import USDC_MINT
 
 logger = logger.bind(name="trade_executer")
 

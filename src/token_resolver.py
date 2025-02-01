@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from logger import logger
 from models import Token, TokenAlias
-from network import TOKEN_PROGRAM_ID
+from network.solana import TOKEN_PROGRAM_ID
 
 logger = logger.bind(name="token_resolver")
 

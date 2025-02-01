@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 from decimal import Decimal
 
 from dotenv import load_dotenv
@@ -32,10 +33,9 @@ def load_risk_config() -> RiskConfig:
     )
 
 
-async def main():
+async def analyze_portfolios(source_addresses: list[str]):
+    """Analyze source portfolios and create trade plan"""
     # Load environment variables
-    # env_path = Path(__file__).parent.parent / ".env"
-    # load_dotenv(env_path)
     load_dotenv()
 
     # Initialize agent with risk configuration
@@ -43,26 +43,13 @@ async def main():
     agent = CopyTradeAgent(os.getenv("RPC_URL"), risk_config=risk_config)
 
     try:
-        # Set wallet from private key
-        private_key = os.getenv("WALLET_PRIVATE_KEY")
-        if not private_key:
-            raise ValueError("WALLET_PRIVATE_KEY not set in .env")
-        agent.set_wallet(private_key)
-
-        # Get source addresses
-        source_addresses = [
-            addr.strip()
-            for addr in os.getenv("SOURCE_ADDRESSES", "").split(",")
-            if addr.strip()
-        ]
-
-        if not source_addresses:
-            raise ValueError("No source addresses configured")
-
-        # Analyze source portfolios
-        logger.info("Analyzing source portfolios...")
-        source_portfolios = await agent.analyze_source_portfolios(source_addresses)
-        target_portfolio = agent.create_target_portfolio(source_portfolios)
+        # Set wallet from private key or address
+        if private_key := os.getenv("WALLET_PRIVATE_KEY"):
+            agent.set_wallet_private_key(private_key)
+        elif wallet_address := os.getenv("WALLET_ADDRESS"):
+            agent.set_wallet_address(wallet_address)
+        else:
+            raise ValueError("Either WALLET_PRIVATE_KEY or WALLET_ADDRESS must be set")
 
         # Get current portfolio
         logger.info(f"Getting current portfolio for {agent.wallet_address}...")
@@ -70,53 +57,92 @@ async def main():
 
         # Log portfolio information
         logger.info("Current Portfolio:")
-        for mint, balance in current_portfolio.token_balances.items():
-            weight = current_portfolio.get_token_weight(mint)
-            logger.info(f"  {mint}: ${balance.usd_value:.2f} ({weight:.1%})")
-
-        logger.info("Target Portfolio:")
-        # Sort by USD value
+        logger.info(f"Total value: ${current_portfolio.total_value_usd:,.2f}")
         sorted_balances = sorted(
-            target_portfolio.token_balances.values(),
-            key=lambda x: float(x.usd_value),  # Convert to float for sorting
+            current_portfolio.token_balances.values(),
+            key=lambda x: float(x.usd_value),
             reverse=True,
         )
-        logger.info(f"Total value: ${target_portfolio.total_value_usd:,.2f}")
         for balance in sorted_balances:
-            if float(balance.usd_value) >= 1:  # Convert to float for comparison
+            if float(balance.usd_value) >= 1:
+                weight = current_portfolio.get_token_weight(balance.mint)
                 logger.info(
-                    f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {balance.weight:6.2%}"
+                    f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {weight:6.2%}"
                 )
 
+        # Analyze source portfolios
+        logger.info("Analyzing source portfolios...")
+        source_portfolios = await agent.analyze_source_portfolios(source_addresses)
+        target_portfolio = agent.create_target_portfolio(
+            source_portfolios, current_portfolio.total_value_usd
+        )
+
+        # Log target portfolio information
+        logger.info("Target Portfolio:")
+        logger.info(f"Total value: ${target_portfolio.total_value_usd:,.2f}")
+        sorted_balances = sorted(
+            target_portfolio.token_balances.values(),
+            key=lambda x: float(x.usd_value),
+            reverse=True,
+        )
+        for balance in sorted_balances:
+            if float(balance.usd_value) >= 1:
+                weight = target_portfolio.get_token_weight(balance.mint)
+                logger.info(
+                    f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {weight:6.2%}"
+                )
+
+        # Create trade plan
         logger.info("Creating trade plan...")
         trades = await agent.create_trade_plan(current_portfolio, target_portfolio)
 
         if trades:
             logger.info(f"Found {len(trades)} trades to execute:")
-            total_value = Decimal(str(sum(t["usd_value"] for t in trades)))
+            total_value = Decimal(str(sum(t.usd_value for t in trades)))
             for trade in trades:
-                trade_value = Decimal(str(trade["usd_value"]))
+                trade_value = trade.usd_value
                 logger.info(
-                    f"  {trade['type'].upper()}: {trade['mint']} "
+                    f"- {trade.type.upper()}: {trade.from_symbol} -> {trade.to_symbol} "
                     f"for ${trade_value:.2f} "
                     f"({trade_value/total_value:.1%} of total trades)"
                 )
-
-            confirmation = input("Execute these trades? [y/N]: ")
-            if confirmation.lower() == "y":
-                logger.info("Executing trades...")
-                await agent.execute_trades(trades)
-                logger.info("All trades completed")
-            else:
-                logger.info("Trade execution cancelled")
         else:
             logger.info("No trades needed")
 
     except Exception as e:
         logger.error(f"Error: {e}")
+        raise SystemExit(1)
     finally:
         await agent.close()
 
 
+def print_usage():
+    """Print usage information"""
+    logger.info(
+        "Usage: uv run ./src/main.py analyze <source_address1> [source_address2 ...]"
+    )
+    logger.info(
+        "Example: uv run ./src/main.py analyze Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
+    )
+
+
+async def main():
+    """Main entry point"""
+    if len(sys.argv) < 3 or sys.argv[1] != "analyze":
+        print_usage()
+        return
+
+    source_addresses = sys.argv[2:]
+    await analyze_portfolios(source_addresses)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except SystemExit as e:
+        raise e
+    except KeyboardInterrupt:
+        logger.info("Process interrupted by user")
+    except Exception as e:
+        logger.exception(f"Unhandled error: {e}")
+        raise SystemExit(1)

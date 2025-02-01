@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Dict, Optional
 
 from logger import logger
-from network import SOL_MINT
+from network.solana import SOL_MINT
 from token_price_resolver import TokenPriceResolver
 from token_resolver import TokenResolver
 

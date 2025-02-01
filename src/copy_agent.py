@@ -11,7 +11,7 @@ from solders.pubkey import Pubkey  # type: ignore
 
 from logger import logger
 from models import TokenAlias, Trade
-from network import USDC_MINT
+from network.solana import USDC_MINT
 from portfolio import Portfolio, PortfolioAnalyzer, TokenBalance
 from token_price_resolver import TokenPriceResolver
 from token_resolver import TokenResolver

@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 
 from logger import logger
 from models import RiskConfig, SwapTrade, TokenAlias, Trade
-from network import USDC_MINT
+from network.solana import USDC_MINT
 from portfolio import Portfolio
 from token_price_resolver import TokenPriceResolver
 from token_resolver import TokenResolver
