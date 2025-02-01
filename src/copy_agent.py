@@ -127,23 +127,22 @@ class CopyTradeAgent:
                     key=lambda x: float(x.usd_value),
                     reverse=True,
                 )
-                for balance in sorted_balances:
-                    if float(balance.usd_value) >= 1:
-                        logger.info(
-                            f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {balance.weight:6.2%}"
-                        )
+                # for balance in sorted_balances:
+                #     if float(balance.usd_value) >= 1:
+                #         logger.info(
+                #             f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {balance.weight:6.2%}"
+                #         )
 
             except Exception as e:
                 logger.warning(f"Failed to get portfolio for {address}: {e}")
         return portfolios
 
     def create_target_portfolio(
-        self, source_portfolios: Dict[str, Portfolio]
+        self, source_portfolios: Dict[str, Portfolio], current_usd_value: Decimal
     ) -> Portfolio:
         """Create target portfolio based on source portfolios with time-weighted average"""
         token_balances: Dict[str, TokenBalance] = {}
         current_time = Decimal(str(time.time()))
-        total_value = Decimal("0")
 
         # Calculate time weights
         time_weights = {}
@@ -163,6 +162,7 @@ class CopyTradeAgent:
             time_weights[portfolio_id] /= total_weight
 
         # Calculate weighted average portfolio
+        total_value = Decimal(0)
         for portfolio in source_portfolios.values():
             weight = time_weights[id(portfolio)]
             for mint, balance in portfolio.token_balances.items():
@@ -178,17 +178,44 @@ class CopyTradeAgent:
                 token_balances[mint].amount += balance.amount * weight
                 total_value += balance.usd_value * weight
 
+        # First, normalize all weights to sum to 100%
+        if total_value > 0:
+            for balance in token_balances.values():
+                balance.usd_value = (
+                    balance.usd_value / total_value
+                ) * current_usd_value
+                balance.amount = (balance.amount / total_value) * current_usd_value
+
+        # Remove tokens with value less than minimum trade size
+        for mint in list(token_balances.keys()):
+            if token_balances[mint].usd_value < self.risk_config.min_trade_size_usd:
+                logger.debug(f"Removing {token_balances[mint].symbol} due to small value: ${token_balances[mint].usd_value}")
+                del token_balances[mint]
+
         # Apply max allocation limit
+        total_value = current_usd_value
         for mint in list(token_balances.keys()):
             allocation = token_balances[mint].usd_value / total_value
             if allocation > self.risk_config.max_portfolio_allocation:
+                old_value = token_balances[mint].usd_value
                 token_balances[mint].usd_value = (
                     total_value * self.risk_config.max_portfolio_allocation
                 )
-                total_value = sum(t.usd_value for t in token_balances.values())
+                token_balances[mint].amount *= (
+                    token_balances[mint].usd_value / old_value
+                )
+
+        # Final normalization after max allocation limit
+        total_value = sum(t.usd_value for t in token_balances.values())
+        logger.info(f"Total value: {total_value}")
+        if total_value > 0 and total_value != current_usd_value:
+            scale_factor = current_usd_value / total_value
+            for balance in token_balances.values():
+                balance.usd_value *= scale_factor
+                balance.amount *= scale_factor
 
         return Portfolio(
-            total_value_usd=total_value,
+            total_value_usd=current_usd_value,
             token_balances=token_balances,
             timestamp=float(current_time),
         )
@@ -235,9 +262,20 @@ async def main():
     ]
     agent = None
     try:
+        risk_config = RiskConfig(
+            max_trade_size_usd=Decimal("1000"),
+            min_trade_size_usd=Decimal("10"),
+            max_slippage_bps=100,
+            max_portfolio_allocation=Decimal("0.75"),
+            gas_buffer_sol=Decimal("0.1"),
+            weight_tolerance=Decimal("0.02"),
+            min_weight_threshold=Decimal("0.01"),
+        )
         # Initialize agent with Solana mainnet RPC URL
         agent = CopyTradeAgent(
-            rpc_url="https://api.mainnet-beta.solana.com", token_aliases=token_aliases
+            rpc_url="https://api.mainnet-beta.solana.com",
+            token_aliases=token_aliases,
+            risk_config=risk_config,
         )
 
         # Set wallet from environment variables
@@ -259,6 +297,8 @@ async def main():
         logger.info(
             f"Current portfolio value: ${current_portfolio.total_value_usd:,.2f}"
         )
+        min_weight = risk_config.min_trade_size_usd / current_portfolio.total_value_usd
+        logger.info(f"Min weight: {min_weight * 100:.2f}%")
         sorted_balances = sorted(
             current_portfolio.token_balances.values(),
             key=lambda x: float(x.usd_value),
@@ -266,8 +306,9 @@ async def main():
         )
 
         for balance in sorted_balances:
+            weight = balance.usd_value / current_portfolio.total_value_usd
             logger.info(
-                f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f})"
+                f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {weight:6.2%}"
             )
 
         # Get source portfolio
@@ -278,7 +319,9 @@ async def main():
         portfolios = await agent.analyze_source_portfolios(source_addresses)
 
         # Create target portfolio
-        target_portfolio = agent.create_target_portfolio(portfolios)
+        target_portfolio = agent.create_target_portfolio(
+            portfolios, current_portfolio.total_value_usd
+        )
         logger.info(f"Target portfolio value: ${target_portfolio.total_value_usd:,.2f}")
         sorted_balances = sorted(
             target_portfolio.token_balances.values(),
@@ -286,8 +329,9 @@ async def main():
             reverse=True,
         )
         for balance in sorted_balances:
+            weight = balance.usd_value / target_portfolio.total_value_usd
             logger.info(
-                f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f})"
+                f"- {balance.symbol:12} {balance.amount:10,.6f} (${balance.usd_value:12,.2f}) {weight:6.2%}"
             )
 
         # Create trade plan
@@ -300,11 +344,12 @@ async def main():
         logger.info("Planned trades:")
         for trade in trades:
             if trade.type == "swap":
-                logger.info(
-                    f"- swap {trade.from_symbol:12} -> {trade.to_symbol:12} "
-                    f"{trade.from_amount:10,.6f} -> {trade.to_amount:10,.6f} "
-                    f"(${trade.usd_value:12,.2f})"
-                )
+                if weight >= min_weight:
+                    logger.info(
+                        f"- swap {trade.from_symbol:12} -> {trade.to_symbol:12} "
+                        f"{trade.from_amount:10,.6f} -> {trade.to_amount:10,.6f} "
+                        f"(${trade.usd_value:12,.2f})"
+                    )
 
         # Execute trades only if private key is set
         if trades and has_private_key:
@@ -332,6 +377,9 @@ async def main():
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    load_dotenv()
     try:
         asyncio.run(main())
     except SystemExit as e:
