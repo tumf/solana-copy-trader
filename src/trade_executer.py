@@ -1,6 +1,6 @@
 import asyncio
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import aiohttp
 from solana.rpc.async_api import AsyncClient
@@ -121,9 +121,12 @@ class TradeExecuter:
 
         try:
             # Try Jupiter
-            prices = await self.jupiter_client.get_token_price_by_ids([mint])
-            if mint in prices:
-                return prices[mint]
+            prices: Dict[str, Decimal] = (
+                await self.jupiter_client.get_token_price_by_ids([mint])
+            )
+            price = prices.get(mint)
+            if price is not None:
+                return price
             raise ValueError(f"Price not found for token {mint}")
 
         except Exception as e:
@@ -141,12 +144,18 @@ class TradeExecuter:
                     )
                     # トランザクションの確認を待つ
                     if result.tx_signature:
-                        logger.info(f"Waiting for transaction confirmation: {result.tx_signature}")
-                        confirmed = await self.jupiter_client.wait_for_transaction(result.tx_signature)
+                        logger.info(
+                            f"Waiting for transaction confirmation: {result.tx_signature}"
+                        )
+                        confirmed = await self.jupiter_client.wait_for_transaction(
+                            result.tx_signature
+                        )
                         if confirmed:
                             logger.info(f"Transaction confirmed: {result.tx_signature}")
                         else:
-                            logger.error(f"Transaction failed or timed out: {result.tx_signature}")
+                            logger.error(
+                                f"Transaction failed or timed out: {result.tx_signature}"
+                            )
                 else:
                     raise RuntimeError(
                         f"Failed to execute trade {trade.from_symbol} -> {trade.to_symbol}: {result.error_message}"

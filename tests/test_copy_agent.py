@@ -24,8 +24,8 @@ def risk_config():
     )
 
 
-@pytest_asyncio.fixture
-async def agent(risk_config):
+@pytest_asyncio.fixture  # type: ignore
+async def agent(risk_config: RiskConfig) -> CopyTradeAgent:
     agent = CopyTradeAgent(rpc_url="http://test-rpc.url", risk_config=risk_config)
     # Mock the session to avoid actual HTTP requests
     agent.session = AsyncMock(spec=ClientSession)
@@ -292,7 +292,7 @@ async def test_wait_for_transaction(agent):
                 "value": {"err": None},
                 "confirmations": 1,
             }
-        }
+        },
     }
     mock_ws.close = AsyncMock()
 
@@ -301,13 +301,21 @@ async def test_wait_for_transaction(agent):
     mock_session.ws_connect = AsyncMock(return_value=mock_ws)
 
     # Mock wait_for_transaction method
-    agent.trade_executer.jupiter_client.wait_for_transaction = AsyncMock(return_value=True)
+    agent.trade_executer.jupiter_client.wait_for_transaction = AsyncMock(
+        return_value=True
+    )
 
     # Test successful transaction
-    result = await agent.trade_executer.jupiter_client.wait_for_transaction("test_signature")
+    result = await agent.trade_executer.jupiter_client.wait_for_transaction(
+        "test_signature"
+    )
     assert result is True
 
     # Test failed transaction
-    agent.trade_executer.jupiter_client.wait_for_transaction = AsyncMock(return_value=False)
-    result = await agent.trade_executer.jupiter_client.wait_for_transaction("test_signature")
+    agent.trade_executer.jupiter_client.wait_for_transaction = AsyncMock(
+        return_value=False
+    )
+    result = await agent.trade_executer.jupiter_client.wait_for_transaction(
+        "test_signature"
+    )
     assert result is False
