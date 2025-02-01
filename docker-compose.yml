@@ -1,0 +1,20 @@
+services:
+  copy-trader:
+    build: .
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./data:/app/data # データベースの永続化
+    command: >
+      /bin/sh -c "python src/update_token_list.py && python src/main.py trade -i 60"
+    restart: unless-stopped
+    environment:
+      - RPC_URL=${RPC_URL:?RPC_URL is required}
+      - WALLET_PRIVATE_KEY=${WALLET_PRIVATE_KEY:?WALLET_PRIVATE_KEY is required}
+      - SOURCE_ADDRESS=${SOURCE_ADDRESS:?SOURCE_ADDRESS is required}
+      - MAX_TRADE_SIZE_USD=${MAX_TRADE_SIZE_USD:-1000}
+      - MIN_TRADE_SIZE_USD=${MIN_TRADE_SIZE_USD:-10}
+      - MAX_SLIPPAGE_BPS=${MAX_SLIPPAGE_BPS:-100}
+      - MAX_PORTFOLIO_ALLOCATION=${MAX_PORTFOLIO_ALLOCATION:-0.25}
+      - GAS_BUFFER_SOL=${GAS_BUFFER_SOL:-0.1}
+      - WEIGHT_TOLERANCE=${WEIGHT_TOLERANCE:-0.02}
+      - MIN_WEIGHT_THRESHOLD=${MIN_WEIGHT_THRESHOLD:-0.01}
