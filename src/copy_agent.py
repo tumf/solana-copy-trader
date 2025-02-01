@@ -42,18 +42,18 @@ class CopyTradeAgent:
             weight_tolerance=Decimal("0.02"),
             min_weight_threshold=Decimal("0.01"),
         )
+        self.token_aliases = token_aliases or TOKEN_ALIAS
 
         self.token_resolver = TokenResolver()
         self.token_price_resolver = TokenPriceResolver(rpc_url=self.rpc_url)
-        if token_aliases:
-            self.token_resolver.set_token_aliases(token_aliases)
+
         self.portfolio_analyzer = PortfolioAnalyzer(
             token_resolver=self.token_resolver,
             token_price_resolver=self.token_price_resolver,
         )
         self.trade_planner = TradePlanner(
             self.risk_config,
-            token_aliases,
+            self.token_aliases,
             token_price_resolver=self.token_price_resolver,
             token_resolver=self.token_resolver,
         )

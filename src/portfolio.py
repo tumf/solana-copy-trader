@@ -132,9 +132,7 @@ class PortfolioAnalyzer:
             total_value_usd = Decimal("0")
             # Get prices for all tokens at once
             active_mints = [
-                self.token_resolver.resolve_address(account.mint)
-                for account in token_accounts
-                if account.amount > 0
+                account.mint for account in token_accounts if account.amount > 0
             ]
             active_mints.append(SOL_MINT)
             prices = await self.token_price_resolver.get_token_prices(active_mints)
@@ -156,21 +154,20 @@ class PortfolioAnalyzer:
                 if account.amount == 0:
                     continue
 
-                resolved_mint = self.token_resolver.resolve_address(account.mint)
-                price = prices.get(resolved_mint, Decimal(0))
+                price = prices.get(account.mint, Decimal(0))
                 usd_value = account.amount * price
                 total_value_usd += usd_value
 
-                metadata = await self._get_token_metadata(resolved_mint)
-                symbol = metadata.get("symbol", resolved_mint[:8] + "...")
+                metadata = await self._get_token_metadata(account.mint)
+                symbol = metadata.get("symbol", account.mint[:8] + "...")
 
                 # 同じトークンの場合は合算する
-                if resolved_mint in token_balances:
-                    token_balances[resolved_mint].amount += account.amount
-                    token_balances[resolved_mint].usd_value += usd_value
+                if account.mint in token_balances:
+                    token_balances[account.mint].amount += account.amount
+                    token_balances[account.mint].usd_value += usd_value
                 else:
-                    token_balances[resolved_mint] = TokenBalance(
-                        mint=resolved_mint,
+                    token_balances[account.mint] = TokenBalance(
+                        mint=account.mint,
                         amount=account.amount,
                         decimals=account.decimals,
                         usd_value=usd_value,

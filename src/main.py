@@ -40,7 +40,10 @@ async def analyze_portfolios(source_addresses: list[str]):
 
     # Initialize agent with risk configuration
     risk_config = load_risk_config()
-    agent = CopyTradeAgent(os.getenv("RPC_URL"), risk_config=risk_config)
+    agent = CopyTradeAgent(
+        os.getenv("RPC_URL"),
+        risk_config=risk_config,
+    )
 
     try:
         # Set wallet from private key or address
@@ -107,7 +110,7 @@ async def analyze_portfolios(source_addresses: list[str]):
                     f"({trade_value/total_value:.1%} of total trades)"
                 )
         else:
-            logger.info("No trades needed")
+            logger.info("- No trades needed")
 
     except Exception as e:
         logger.error(f"Error: {e}")

@@ -173,16 +173,3 @@ class TokenResolver:
             await self.session.close()
             await asyncio.sleep(0.1)  # Give time for the session to close properly
             self.session = None
-
-    def resolve_address(self, address: str) -> str:
-        """トークンの置換が設定されている場合は置換先のアドレスに変換する
-        例: USDT -> USDC"""
-        return self.token_replacement_map.get(address, address)
-
-    def set_token_aliases(self, token_aliases: List[TokenAlias]) -> None:
-        """トークンの置換マップを設定する"""
-        self.token_replacement_map.clear()
-        for alias in token_aliases:
-            # 置換対象のトークン(USDT)から、置換先のトークン(USDC)へのマッピング
-            for replaceable_token in alias.aliases:
-                self.token_replacement_map[replaceable_token] = alias.address
