@@ -9,6 +9,15 @@ from loguru import logger
 from copy_agent import CopyTradeAgent
 from models import RiskConfig
 
+# Configure logger
+logger.remove()
+logger.add(
+    sys.stderr,
+    format=("<level>{message}</level>"),
+    level="INFO",
+    colorize=True,
+)
+
 
 def load_risk_config() -> RiskConfig:
     """Load risk configuration from environment variables"""
@@ -33,7 +42,7 @@ def load_risk_config() -> RiskConfig:
     )
 
 
-async def analyze_portfolios(source_addresses: list[str]):
+async def analyze_portfolios(source_addresses: list[str], execute_trades: bool = False):
     """Analyze source portfolios and create trade plan"""
     # Load environment variables
     load_dotenv()
@@ -98,19 +107,24 @@ async def analyze_portfolios(source_addresses: list[str]):
         # Create trade plan
         logger.info("Creating trade plan...")
         trades = await agent.create_trade_plan(current_portfolio, target_portfolio)
-
-        if trades:
-            logger.info(f"Found {len(trades)} trades to execute:")
-            total_value = Decimal(str(sum(t.usd_value for t in trades)))
-            for trade in trades:
-                trade_value = trade.usd_value
-                logger.info(
-                    f"- {trade.type.upper()}: {trade.from_symbol} -> {trade.to_symbol} "
-                    f"for ${trade_value:.2f} "
-                    f"({trade_value/total_value:.1%} of total trades)"
-                )
+        if not trades:
+            logger.info("No trades needed")
         else:
-            logger.info("- No trades needed")
+            logger.info("Planned trades:")
+            for trade in trades:
+                logger.info(
+                    f"- swap {trade.from_symbol:12} -> {trade.to_symbol:12} "
+                    f"{trade.from_amount:10,.6f} -> {trade.to_amount:10,.6f} "
+                    f"(${trade.usd_value:12,.2f})"
+                )
+
+        # Execute trades if requested
+        if execute_trades:
+            if not agent.wallet_private_key:
+                raise ValueError("WALLET_PRIVATE_KEY is required for trade execution")
+            logger.info("Executing trades...")
+            await agent.execute_trades(trades)
+            logger.info("Trade execution completed")
 
     except Exception as e:
         logger.error(f"Error: {e}")
@@ -121,22 +135,61 @@ async def analyze_portfolios(source_addresses: list[str]):
 
 def print_usage():
     """Print usage information"""
-    logger.info(
-        "Usage: uv run ./src/main.py analyze <source_address1> [source_address2 ...]"
+    print("Usage:")
+    print("  Analyze portfolios:")
+    print(
+        "    uv run python ./src/main.py analyze <source_address1> [<source_address2> ...]"
     )
-    logger.info(
-        "Example: uv run ./src/main.py analyze Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"
+    print()
+    print("  Execute trades:")
+    print(
+        "    uv run python ./src/main.py trade <source_address1> [<source_address2> ...]"
     )
+    print()
+    print("Environment variables:")
+    print("  Required:")
+    print("    - RPC_URL: Solana RPC URL")
+    print(
+        "    - WALLET_PRIVATE_KEY or WALLET_ADDRESS: Your wallet's private key (for trading) or address (for analysis)"
+    )
+    print()
+    print("  Optional:")
+    print("    - MAX_TRADE_SIZE_USD: Maximum trade size in USD (default: 1000)")
+    print("    - MIN_TRADE_SIZE_USD: Minimum trade size in USD (default: 10)")
+    print("    - MAX_SLIPPAGE_BPS: Maximum slippage in basis points (default: 100)")
+    print(
+        "    - MAX_PORTFOLIO_ALLOCATION: Maximum allocation per token (default: 0.25)"
+    )
+    print("    - GAS_BUFFER_SOL: SOL to keep for gas fees (default: 0.1)")
+    print("    - WEIGHT_TOLERANCE: Portfolio weight tolerance (default: 0.02)")
+    print("    - MIN_WEIGHT_THRESHOLD: Minimum weight to consider (default: 0.01)")
 
 
 async def main():
     """Main entry point"""
-    if len(sys.argv) < 3 or sys.argv[1] != "analyze":
+    if len(sys.argv) < 2:
         print_usage()
-        return
+        sys.exit(1)
 
-    source_addresses = sys.argv[2:]
-    await analyze_portfolios(source_addresses)
+    command = sys.argv[1]
+    if command == "analyze":
+        if len(sys.argv) < 3:
+            print("Error: No source addresses provided")
+            print_usage()
+            sys.exit(1)
+        source_addresses = sys.argv[2:]
+        await analyze_portfolios(source_addresses)
+    elif command == "trade":
+        if len(sys.argv) < 3:
+            print("Error: No source addresses provided")
+            print_usage()
+            sys.exit(1)
+        source_addresses = sys.argv[2:]
+        await analyze_portfolios(source_addresses, execute_trades=True)
+    else:
+        print(f"Error: Unknown command '{command}'")
+        print_usage()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

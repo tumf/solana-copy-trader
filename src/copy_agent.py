@@ -21,7 +21,6 @@ from trade_planner import RiskConfig, TradePlanner
 logger = logger.bind(name="copy_agent")
 
 
-
 class CopyTradeAgent:
     def __init__(
         self,
@@ -45,7 +44,7 @@ class CopyTradeAgent:
         )
         self.token_aliases = token_aliases or TOKEN_ALIAS
 
-        self.token_resolver = TokenResolver()
+        self.token_resolver = TokenResolver(rpc_url=self.rpc_url)
         self.token_price_resolver = TokenPriceResolver(rpc_url=self.rpc_url)
 
         self.portfolio_analyzer = PortfolioAnalyzer(

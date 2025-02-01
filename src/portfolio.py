@@ -53,8 +53,8 @@ class Portfolio:
 class PortfolioAnalyzer:
     def __init__(
         self,
-        token_resolver: Optional[TokenResolver] = None,
-        token_price_resolver: Optional[TokenPriceResolver] = None,
+        token_resolver: Optional[TokenResolver] = TokenResolver(),
+        token_price_resolver: Optional[TokenPriceResolver] = TokenPriceResolver(),
     ):
         self.token_resolver = token_resolver or TokenResolver()
         self.token_price_resolver = token_price_resolver or TokenPriceResolver()
@@ -101,22 +101,28 @@ class PortfolioAnalyzer:
             )
 
             # Get SOL balance
-            payload = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getBalance",
-                "params": [wallet_address],
-            }
-            session = await self.token_resolver.ensure_session()
-            async with session.post(
-                self.token_resolver.rpc_url, json=payload
-            ) as response:
-                data = await response.json()
-                if "error" in data:
-                    raise Exception(f"RPC error: {data['error']}")
-                sol_lamports = data["result"]["value"]
-                sol_balance = Decimal(str(sol_lamports)) / Decimal(10**9)
-                logger.debug(f"SOL balance: {sol_balance}")
+            async def get_sol_balance(wallet_address: str) -> Decimal:
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getBalance",
+                    "params": [wallet_address],
+                }
+                session = await self.token_resolver.ensure_session()
+                async with session.post(
+                    self.token_resolver.rpc_url, json=payload
+                ) as response:
+                    data = await response.json()
+                    if "error" in data:
+                        raise Exception(
+                            f"RPC error: {data['error']} rpc_url: {self.token_resolver.rpc_url}"
+                        )
+                    sol_lamports = data["result"]["value"]
+                    sol_balance = Decimal(str(sol_lamports)) / Decimal(10**9)
+                    return sol_balance
+
+            sol_balance = await get_sol_balance(wallet_address)
+            logger.debug(f"SOL balance: {sol_balance}")
 
             if not token_accounts and sol_balance == 0:
                 logger.info(f"No token accounts found for {wallet_address}")
@@ -185,7 +191,9 @@ class PortfolioAnalyzer:
             )
 
         except Exception as e:
-            logger.error(f"Error getting wallet portfolio: {e}")
+            logger.error(
+                f"Error getting wallet portfolio: {e} wallet_address: {wallet_address}"
+            )
             raise
 
     @logger.catch

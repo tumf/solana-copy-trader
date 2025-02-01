@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 import aiohttp
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+import json
 
 from logger import logger
 from models import Token, TokenAlias
@@ -132,11 +133,24 @@ class TokenResolver:
             }
 
             session = await self.ensure_session()
-            async with session.post(self.rpc_url, json=payload) as response:
-                data = await response.json()
+            async with session.post(self.rpc_url, json=payload, timeout=30) as response:
+                response.raise_for_status()  # Raise an error for bad HTTP status codes
+                try:
+                    data = await response.json()
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"Failed to decode JSON response: {e}")
+                    self.logger.debug(f"Response content: {await response.text()}")
+                    raise Exception(f"Invalid JSON response from RPC endpoint: {e}")
 
                 if "error" in data:
-                    raise Exception(f"RPC error: {data['error']}")
+                    error_msg = f"RPC error: {data['error']} rpc_url: {self.rpc_url}"
+                    self.logger.error(error_msg)
+                    raise Exception(error_msg)
+
+                if "result" not in data or "value" not in data["result"]:
+                    error_msg = f"Unexpected response format from RPC endpoint: {data}"
+                    self.logger.error(error_msg)
+                    raise Exception(error_msg)
 
                 accounts = data["result"]["value"]
                 self.logger.debug(f"Found {len(accounts)} token accounts")

@@ -24,6 +24,7 @@ class JupiterClient:
         self.rpc_url = rpc_url
         self.ws_url = self.rpc_url.replace("http", "ws")
         self.session = None
+        self.ws_session = None
         self.price_url = "https://api.jup.ag/price/v2"
         self.quote_url = "https://api.jup.ag/swap/v1"
         self.headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
@@ -42,7 +43,9 @@ class JupiterClient:
     async def ensure_ws(self):
         """Ensure WebSocket connection is initialized"""
         if self.ws is None:
-            self.ws = await aiohttp.ClientSession().ws_connect(self.ws_url)
+            if self.ws_session is None:
+                self.ws_session = aiohttp.ClientSession()
+            self.ws = await self.ws_session.ws_connect(self.ws_url)
         return self.ws
 
     async def close_ws(self):
@@ -50,6 +53,9 @@ class JupiterClient:
         if self.ws:
             await self.ws.close()
             self.ws = None
+        if self.ws_session:
+            await self.ws_session.close()
+            self.ws_session = None
 
     async def get_token_prices(self, mints: List[str]) -> Dict[str, Decimal]:
         """Get token prices from Jupiter API in batches
@@ -412,8 +418,8 @@ class JupiterClient:
 
     async def close(self):
         """Close all connections"""
+        await self.close_ws()
         if self.session:
             await self.session.close()
-            await asyncio.sleep(0.1)  # Give time for the session to close properly
             self.session = None
-        await self.close_ws()
+        await asyncio.sleep(0.1)  # Give time for the sessions to close properly
