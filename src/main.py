@@ -119,7 +119,7 @@ async def analyze_portfolios(source_addresses: list[str], execute_trades: bool =
                 )
 
         # Execute trades if requested
-        if execute_trades:
+        if execute_trades and len(trades) > 0:
             if not agent.wallet_private_key:
                 raise ValueError("WALLET_PRIVATE_KEY is required for trade execution")
             logger.info("Executing trades...")
@@ -143,7 +143,12 @@ def print_usage():
     print()
     print("  Execute trades:")
     print(
-        "    uv run python ./src/main.py trade <source_address1> [<source_address2> ...]"
+        "    uv run python ./src/main.py trade <source_address1> [<source_address2> ...] [--interval=<seconds>|-i <seconds>]"
+    )
+    print()
+    print("Options:")
+    print(
+        "    --interval=<seconds>, -i <seconds>  Execute trades repeatedly with specified interval (default: 60)"
     )
     print()
     print("Environment variables:")
@@ -172,20 +177,72 @@ async def main():
         sys.exit(1)
 
     command = sys.argv[1]
+    interval = None  # Default to run once
+
+    # Parse arguments
+    args = sys.argv[2:]
+    source_addresses = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+
+        # --interval=60 形式のパース
+        if arg.startswith("--interval="):
+            try:
+                value = arg.split("=")[1]
+                interval = (
+                    int(value) if value else 60
+                )  # Empty value means use default 60
+                if interval <= 0:
+                    raise ValueError("Interval must be a positive number")
+            except IndexError:
+                interval = 60  # Use default when no value provided
+            except ValueError as e:
+                print(f"Error: {str(e)}")
+                print_usage()
+                sys.exit(1)
+            i += 1
+        # --interval 60 または -i 60 形式のパース
+        elif arg in ["--interval", "-i"]:
+            if i + 1 >= len(args):
+                interval = 60  # Use default when no value provided
+            else:
+                try:
+                    interval = int(args[i + 1])
+                    if interval <= 0:
+                        raise ValueError("Interval must be a positive number")
+                    i += 1
+                except ValueError:
+                    interval = 60  # Use default when invalid value provided
+            i += 1
+        else:
+            source_addresses.append(arg)
+            i += 1
+
+    if not source_addresses:
+        print("Error: No source addresses provided")
+        print_usage()
+        sys.exit(1)
+
     if command == "analyze":
-        if len(sys.argv) < 3:
-            print("Error: No source addresses provided")
-            print_usage()
-            sys.exit(1)
-        source_addresses = sys.argv[2:]
         await analyze_portfolios(source_addresses)
     elif command == "trade":
-        if len(sys.argv) < 3:
-            print("Error: No source addresses provided")
-            print_usage()
-            sys.exit(1)
-        source_addresses = sys.argv[2:]
-        await analyze_portfolios(source_addresses, execute_trades=True)
+        if interval is not None:  # Only run repeatedly if interval is specified
+            logger.info(f"Running trade every {interval} seconds")
+            while True:
+                try:
+                    await analyze_portfolios(source_addresses, execute_trades=True)
+                    logger.info(f"Waiting {interval} seconds before next trade...")
+                    await asyncio.sleep(interval)
+                except KeyboardInterrupt:
+                    logger.info("Process interrupted by user")
+                    break
+                except Exception as e:
+                    logger.error(f"Error during trade: {e}")
+                    logger.info(f"Retrying in {interval} seconds...")
+                    await asyncio.sleep(interval)
+        else:
+            await analyze_portfolios(source_addresses, execute_trades=True)
     else:
         print(f"Error: Unknown command '{command}'")
         print_usage()
