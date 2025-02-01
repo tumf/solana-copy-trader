@@ -118,7 +118,8 @@ class CopyTradeAgent:
             try:
                 portfolio = await self.get_wallet_portfolio(address)
                 portfolios[address] = portfolio
-                return portfolio
+                return portfolios
+
                 # Display portfolio summary
                 logger.info(f"Portfolio for {address}:")
                 logger.info(f"Total value: ${portfolio.total_value_usd:,.2f}")
