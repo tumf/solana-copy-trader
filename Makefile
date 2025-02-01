@@ -1,7 +1,11 @@
-.PHONY: check format lint typecheck test clean coverage coverage-html
+.PHONY: check format lint typecheck test clean coverage coverage-html install
 
 # Default target
 all: check
+
+install:
+	@echo "🔧 Installing dependencies..."
+	uv sync --all-extras
 
 # Format code
 format:
