@@ -2,6 +2,8 @@ import asyncio
 import base64
 from decimal import Decimal
 from typing import Dict, List, Optional
+import time
+import json
 
 import aiohttp
 from loguru import logger
@@ -18,11 +20,13 @@ logger = logger.bind(name="jupiter")
 
 class JupiterClient:
     def __init__(self, rpc_url: Optional[str] = None):
-        self.rpc_url = rpc_url
+        self.rpc_url = rpc_url or "https://api.mainnet-beta.solana.com"
+        self.ws_url = self.rpc_url.replace("http", "ws")
         self.session = None
         self.price_url = "https://api.jup.ag/price/v2"
         self.quote_url = "https://api.jup.ag/swap/v1"
         self.headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+        self.ws = None
 
     async def initialize(self):
         """Initialize Jupiter client"""
@@ -34,12 +38,17 @@ class JupiterClient:
             self.session = aiohttp.ClientSession(headers=self.headers)
         return self.session
 
-    async def close(self):
-        """Close the session"""
-        if self.session:
-            await self.session.close()
-            await asyncio.sleep(0.1)  # Give time for the session to close properly
-            self.session = None
+    async def ensure_ws(self):
+        """Ensure WebSocket connection is initialized"""
+        if self.ws is None:
+            self.ws = await aiohttp.ClientSession().ws_connect(self.ws_url)
+        return self.ws
+
+    async def close_ws(self):
+        """Close WebSocket connection"""
+        if self.ws:
+            await self.ws.close()
+            self.ws = None
 
     async def get_token_prices(self, mints: List[str]) -> Dict[str, Decimal]:
         """Get token prices from Jupiter API in batches
@@ -285,3 +294,128 @@ class JupiterClient:
         except Exception as e:
             logger.exception(f"Error executing swap: {e}")
             return SwapResult(success=False, tx_signature=None, error_message=str(e))
+
+    async def get_transaction_status(self, signature: str) -> Optional[Dict]:
+        """Get transaction status from Solana RPC
+
+        Args:
+            signature: Transaction signature
+
+        Returns:
+            Transaction status if successful, None otherwise
+        """
+        try:
+            session = await self.ensure_session()
+            url = self.rpc_url
+            if not url:
+                url = "https://api.mainnet-beta.solana.com"
+
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getTransaction",
+                "params": [
+                    signature,
+                    {
+                        "encoding": "json",
+                        "maxSupportedTransactionVersion": 0,
+                        "commitment": "confirmed",
+                    },
+                ],
+            }
+
+            async with session.post(url, json=payload) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(
+                        f"Error from Solana RPC: {response.status} - {error_text}"
+                    )
+                    return None
+
+                data = await response.json()
+                if "error" in data:
+                    logger.error(f"Error from Solana RPC: {data['error']}")
+                    return None
+
+                return data["result"]
+
+        except Exception as e:
+            logger.exception(f"Error getting transaction status: {e}")
+            return None
+
+    async def wait_for_transaction(self, signature: str, timeout: int = 60) -> bool:
+        """Wait for transaction to be confirmed using WebSocket
+
+        Args:
+            signature: Transaction signature
+            timeout: Timeout in seconds (default: 60)
+
+        Returns:
+            True if transaction was confirmed, False otherwise
+        """
+        try:
+            ws = await self.ensure_ws()
+
+            # Subscribe to transaction confirmation
+            subscribe_msg = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "signatureSubscribe",
+                "params": [
+                    signature,
+                    {
+                        "commitment": "confirmed",
+                        "enableReceivedNotification": True,
+                    },
+                ],
+            }
+            await ws.send_str(json.dumps(subscribe_msg))
+
+            # Wait for confirmation
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                msg = await ws.receive_json(timeout=timeout)
+                if "method" in msg and msg["method"] == "signatureNotification":
+                    result = msg["params"]["result"]
+                    if result.get("err"):
+                        logger.error(f"Transaction failed: {result['err']}")
+                        return False
+                    logger.info(
+                        f"Transaction confirmed with {result.get('confirmations', 1)} confirmations"
+                    )
+                    return True
+                elif "error" in msg:
+                    logger.error(f"WebSocket error: {msg['error']}")
+                    return False
+
+            logger.error(f"Transaction timed out after {timeout} seconds")
+            return False
+
+        except asyncio.TimeoutError:
+            logger.error(f"Transaction monitoring timed out after {timeout} seconds")
+            return False
+        except Exception as e:
+            logger.exception(f"Error monitoring transaction: {e}")
+            return False
+        finally:
+            # Unsubscribe and close connection
+            try:
+                if self.ws:
+                    unsubscribe_msg = {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "signatureUnsubscribe",
+                        "params": [signature],
+                    }
+                    await ws.send_str(json.dumps(unsubscribe_msg))
+                    await self.close_ws()
+            except Exception as e:
+                logger.error(f"Error closing WebSocket: {e}")
+
+    async def close(self):
+        """Close all connections"""
+        if self.session:
+            await self.session.close()
+            await asyncio.sleep(0.1)  # Give time for the session to close properly
+            self.session = None
+        await self.close_ws()

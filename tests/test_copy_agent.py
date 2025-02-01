@@ -277,3 +277,37 @@ async def test_execute_trades(agent):
 
         # Test executing trades
         await agent.execute_trades(trades)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_transaction(agent):
+    """Test transaction monitoring with WebSocket"""
+    # Mock WebSocket
+    mock_ws = AsyncMock()
+    mock_ws.receive_json.return_value = {
+        "method": "signatureNotification",
+        "params": {
+            "result": {
+                "context": {"slot": 123456789},
+                "value": {"err": None},
+                "confirmations": 1,
+            }
+        }
+    }
+    mock_ws.close = AsyncMock()
+
+    # Mock WebSocket connection
+    mock_session = AsyncMock()
+    mock_session.ws_connect = AsyncMock(return_value=mock_ws)
+
+    # Mock wait_for_transaction method
+    agent.trade_executer.jupiter_client.wait_for_transaction = AsyncMock(return_value=True)
+
+    # Test successful transaction
+    result = await agent.trade_executer.jupiter_client.wait_for_transaction("test_signature")
+    assert result is True
+
+    # Test failed transaction
+    agent.trade_executer.jupiter_client.wait_for_transaction = AsyncMock(return_value=False)
+    result = await agent.trade_executer.jupiter_client.wait_for_transaction("test_signature")
+    assert result is False

@@ -139,6 +139,14 @@ class TradeExecuter:
                     logger.info(
                         f"Swapped {trade.from_symbol} for {trade.to_symbol} (${trade.usd_value}): {result.tx_signature}"
                     )
+                    # トランザクションの確認を待つ
+                    if result.tx_signature:
+                        logger.info(f"Waiting for transaction confirmation: {result.tx_signature}")
+                        confirmed = await self.jupiter_client.wait_for_transaction(result.tx_signature)
+                        if confirmed:
+                            logger.info(f"Transaction confirmed: {result.tx_signature}")
+                        else:
+                            logger.error(f"Transaction failed or timed out: {result.tx_signature}")
                 else:
                     raise RuntimeError(
                         f"Failed to execute trade {trade.from_symbol} -> {trade.to_symbol}: {result.error_message}"
