@@ -11,7 +11,7 @@ from solders.pubkey import Pubkey  # type: ignore
 
 from logger import logger
 from models import TokenAlias, Trade
-from network.solana import USDC_MINT
+from network.solana import TOKEN_ALIAS, USDC_MINT
 from portfolio import Portfolio, PortfolioAnalyzer, TokenBalance
 from token_price_resolver import TokenPriceResolver
 from token_resolver import TokenResolver
@@ -255,14 +255,6 @@ class CopyTradeAgent:
 
 
 async def main():
-    token_aliases = [
-        TokenAlias(
-            address=USDC_MINT,
-            aliases=[
-                "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT
-            ],
-        )
-    ]
     agent = None
     try:
         risk_config = RiskConfig(
@@ -278,7 +270,7 @@ async def main():
         # Initialize agent with Solana mainnet RPC URL
         agent = CopyTradeAgent(
             rpc_url=rpc_url,
-            token_aliases=token_aliases,
+            token_aliases=TOKEN_ALIAS,
             risk_config=risk_config,
         )
 
