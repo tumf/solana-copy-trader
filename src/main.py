@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+import argparse
 from decimal import Decimal
 
 from dotenv import load_dotenv
@@ -30,6 +31,7 @@ def load_risk_config() -> RiskConfig:
             clean_value(os.getenv("MAX_TRADE_SIZE_USD", "1000"))
         ),
         min_trade_size_usd=Decimal(clean_value(os.getenv("MIN_TRADE_SIZE_USD", "10"))),
+        scaling_factor=Decimal(clean_value(os.getenv("SCALING_FACTOR", "10"))),
         max_slippage_bps=int(clean_value(os.getenv("MAX_SLIPPAGE_BPS", "100"))),
         max_portfolio_allocation=Decimal(
             clean_value(os.getenv("MAX_PORTFOLIO_ALLOCATION", "0.25"))
@@ -42,10 +44,15 @@ def load_risk_config() -> RiskConfig:
     )
 
 
-async def analyze_portfolios(source_addresses: list[str], execute_trades: bool = False):
+async def analyze_portfolios(execute_trades: bool = False):
     """Analyze source portfolios and create trade plan"""
     # Load environment variables
     load_dotenv()
+
+    # Get required environment variables
+    source_address = os.getenv("SOURCE_ADDRESS")
+    if not source_address:
+        raise ValueError("SOURCE_ADDRESS environment variable is required")
 
     # Initialize agent with risk configuration
     risk_config = load_risk_config()
@@ -84,7 +91,7 @@ async def analyze_portfolios(source_addresses: list[str], execute_trades: bool =
 
         # Analyze source portfolios
         logger.info("Analyzing source portfolios...")
-        source_portfolios = await agent.analyze_source_portfolios(source_addresses)
+        source_portfolios = await agent.analyze_source_portfolios([source_address])
         target_portfolio = agent.create_target_portfolio(
             source_portfolios, current_portfolio.total_value_usd
         )
@@ -133,119 +140,61 @@ async def analyze_portfolios(source_addresses: list[str], execute_trades: bool =
         await agent.close()
 
 
-def print_usage():
-    """Print usage information"""
-    print("Usage:")
-    print("  Analyze portfolios:")
-    print(
-        "    uv run python ./src/main.py analyze <source_address1> [<source_address2> ...]"
+def create_parser() -> argparse.ArgumentParser:
+    """Create command line argument parser"""
+    parser = argparse.ArgumentParser(
+        description="Solana Copy Trader",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    print()
-    print("  Execute trades:")
-    print(
-        "    uv run python ./src/main.py trade <source_address1> [<source_address2> ...] [--interval=<seconds>|-i <seconds>]"
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Analyze command
+    subparsers.add_parser(
+        "analyze",
+        help="Analyze portfolios without executing trades",
     )
-    print()
-    print("Options:")
-    print(
-        "    --interval=<seconds>, -i <seconds>  Execute trades repeatedly with specified interval (default: 60)"
+
+    # Trade command
+    trade_parser = subparsers.add_parser(
+        "trade",
+        help="Execute trades based on portfolio analysis",
     )
-    print()
-    print("Environment variables:")
-    print("  Required:")
-    print("    - RPC_URL: Solana RPC URL")
-    print(
-        "    - WALLET_PRIVATE_KEY or WALLET_ADDRESS: Your wallet's private key (for trading) or address (for analysis)"
+    trade_parser.add_argument(
+        "--interval",
+        "-i",
+        type=int,
+        help="Trade interval in seconds. If not specified, run only once.",
     )
-    print()
-    print("  Optional:")
-    print("    - MAX_TRADE_SIZE_USD: Maximum trade size in USD (default: 1000)")
-    print("    - MIN_TRADE_SIZE_USD: Minimum trade size in USD (default: 10)")
-    print("    - MAX_SLIPPAGE_BPS: Maximum slippage in basis points (default: 100)")
-    print(
-        "    - MAX_PORTFOLIO_ALLOCATION: Maximum allocation per token (default: 0.25)"
-    )
-    print("    - GAS_BUFFER_SOL: SOL to keep for gas fees (default: 0.1)")
-    print("    - WEIGHT_TOLERANCE: Portfolio weight tolerance (default: 0.02)")
-    print("    - MIN_WEIGHT_THRESHOLD: Minimum weight to consider (default: 0.01)")
+
+    return parser
 
 
 async def main():
     """Main entry point"""
-    if len(sys.argv) < 2:
-        print_usage()
-        sys.exit(1)
+    parser = create_parser()
+    args = parser.parse_args()
 
-    command = sys.argv[1]
-    interval = None  # Default to run once
-
-    # Parse arguments
-    args = sys.argv[2:]
-    source_addresses = []
-    i = 0
-    while i < len(args):
-        arg = args[i]
-
-        # --interval=60 形式のパース
-        if arg.startswith("--interval="):
-            try:
-                value = arg.split("=")[1]
-                interval = (
-                    int(value) if value else 60
-                )  # Empty value means use default 60
-                if interval <= 0:
-                    raise ValueError("Interval must be a positive number")
-            except IndexError:
-                interval = 60  # Use default when no value provided
-            except ValueError as e:
-                print(f"Error: {str(e)}")
-                print_usage()
-                sys.exit(1)
-            i += 1
-        # --interval 60 または -i 60 形式のパース
-        elif arg in ["--interval", "-i"]:
-            if i + 1 >= len(args):
-                interval = 60  # Use default when no value provided
-            else:
-                try:
-                    interval = int(args[i + 1])
-                    if interval <= 0:
-                        raise ValueError("Interval must be a positive number")
-                    i += 1
-                except ValueError:
-                    interval = 60  # Use default when invalid value provided
-            i += 1
-        else:
-            source_addresses.append(arg)
-            i += 1
-
-    if not source_addresses:
-        print("Error: No source addresses provided")
-        print_usage()
-        sys.exit(1)
-
-    if command == "analyze":
-        await analyze_portfolios(source_addresses)
-    elif command == "trade":
-        if interval is not None:  # Only run repeatedly if interval is specified
-            logger.info(f"Running trade every {interval} seconds")
+    if args.command == "analyze":
+        await analyze_portfolios()
+    elif args.command == "trade":
+        if args.interval:
+            logger.info(f"Running trade every {args.interval} seconds")
             while True:
                 try:
-                    await analyze_portfolios(source_addresses, execute_trades=True)
-                    logger.info(f"Waiting {interval} seconds before next trade...")
-                    await asyncio.sleep(interval)
+                    await analyze_portfolios(execute_trades=True)
+                    logger.info(f"Waiting {args.interval} seconds before next trade...")
+                    await asyncio.sleep(args.interval)
                 except KeyboardInterrupt:
                     logger.info("Process interrupted by user")
                     break
                 except Exception as e:
                     logger.error(f"Error during trade: {e}")
-                    logger.info(f"Retrying in {interval} seconds...")
-                    await asyncio.sleep(interval)
+                    logger.info(f"Retrying in {args.interval} seconds...")
+                    await asyncio.sleep(args.interval)
         else:
-            await analyze_portfolios(source_addresses, execute_trades=True)
+            await analyze_portfolios(execute_trades=True)
     else:
-        print(f"Error: Unknown command '{command}'")
-        print_usage()
+        print(f"Error: Unknown command '{args.command}'")
         sys.exit(1)
 
 

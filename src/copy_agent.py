@@ -41,6 +41,7 @@ class CopyTradeAgent:
             gas_buffer_sol=Decimal("0.1"),
             weight_tolerance=Decimal("0.02"),
             min_weight_threshold=Decimal("0.01"),
+            scaling_factor=Decimal("10"),
         )
         self.token_aliases = token_aliases or TOKEN_ALIAS
 
@@ -189,7 +190,11 @@ class CopyTradeAgent:
 
         # Remove tokens with value less than minimum trade size
         for mint in list(token_balances.keys()):
-            if token_balances[mint].usd_value < self.risk_config.min_trade_size_usd:
+            if (
+                token_balances[mint].usd_value
+                < Decimal(str(self.risk_config.min_trade_size_usd))
+                / self.risk_config.scaling_factor
+            ):
                 logger.debug(
                     f"Removing {token_balances[mint].symbol} due to small value: ${token_balances[mint].usd_value}"
                 )

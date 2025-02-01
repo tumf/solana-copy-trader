@@ -8,7 +8,10 @@ SOL_MINT = "So11111111111111111111111111111111111111112"
 TOKEN_ALIAS = [
     TokenAlias(
         address=USDC_MINT,
-        aliases=["Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"],  # USDT
+        aliases=[
+            "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT
+            "USDSwr9ApdHk5bvJKMjzff41FfuX8bSxdKcR81vTwcA",  # USDS
+        ],
     )
 ]
 RPC_URL = "https://api.mainnet-beta.solana.com"

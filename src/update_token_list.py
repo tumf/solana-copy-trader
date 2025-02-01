@@ -16,10 +16,12 @@ from models import Base, Token
 load_dotenv()
 
 # API endpoints
-JUPITER_TOKEN_LIST_URL = "https://tokens.jup.ag/tokens?tags=verified"
+JUPITER_TOKEN_LIST_URL = os.getenv(
+    "JUPITER_TOKEN_LIST_URL", "https://tokens.jup.ag/tokens?tags=strict"
+)
 
 # Database settings
-DATABASE_URL = "sqlite:///data/solana.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///data/solana.db")
 
 # Constants for retry logic
 MAX_RETRIES = 3
@@ -124,6 +126,11 @@ def save_token_data(tokens: List[Token]):
             log_info(f"Added {len(new_tokens)} new tokens to database")
         else:
             log_info("No new tokens to add")
+
+        # remove tokens that are not in the Jupiter token list
+        session.query(Token).filter(Token.source != "jupiter").delete()
+        session.commit()
+        log_info("Removed tokens that are not in the Jupiter token list")
 
 
 async def main():

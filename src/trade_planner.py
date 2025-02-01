@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 
 from logger import logger
 from models import RiskConfig, SwapTrade, TokenAlias, Trade
-from network.solana import USDC_MINT
+from network.solana import SOL_MINT, USDC_MINT
 from portfolio import Portfolio
 from token_price_resolver import TokenPriceResolver
 from token_resolver import TokenResolver
@@ -54,133 +54,136 @@ class TradePlanner:
         self, current_portfolio: Portfolio, target_portfolio: Portfolio
     ) -> List[Trade]:
         """Create trade plan to match target portfolio with risk management and tolerance"""
-        # 売りと買いの取引を分けて集計
         sell_trades: List[SwapTrade] = []  # USDCへの売り取引
         buy_trades: List[SwapTrade] = []  # USDCからの買い取引
 
-        # 現在と目標の総資産価値を取得
+        # 現在の総資産価値を取得
         current_total = Decimal(str(current_portfolio.total_value_usd))
 
-        # すべてのユニークなトークンを収集
-        all_tokens = set(
-            list(current_portfolio.token_balances.keys())
-            + list(target_portfolio.token_balances.keys())
+        # すべてのユニークなトークン（元の表記）を収集し、あらかじめ解決済みのアドレスを算出
+        all_tokens = set(current_portfolio.token_balances.keys()).union(
+            target_portfolio.token_balances.keys()
+        )
+        resolved_map: Dict[str, str] = {
+            token: self.resolve_address(token) for token in all_tokens
+        }
+
+        # 価格取得のため、解決済みアドレスのリストを作成
+        prices = await self.token_price_resolver.get_token_prices(
+            list(resolved_map.values())
         )
 
-        # Get all token prices at once
-        # トークンの置換を適用してからpricesを取得 (例: USDT -> USDC)
-        resolved_tokens = [self.resolve_address(token) for token in all_tokens]
-        prices = await self.token_price_resolver.get_token_prices(resolved_tokens)
+        # --- 目標ポートフォリオの重み計算 ---
+        def get_weight(token: str) -> Decimal:
+            if token == USDC_MINT:
+                scale = Decimal(1)
+            elif token == SOL_MINT:
+                scale = Decimal(1)
+            else:
+                scale = Decimal(self.risk_config.scaling_factor)
 
-        # トークンの重みを計算
+            return Decimal(str(target_portfolio.token_balances[token].weight)) * scale
+
         adjusted_target: Dict[str, Decimal] = {}
         total_adjusted_weight = Decimal(0)
-        for mint in all_tokens:
-            resolved_mint = self.resolve_address(mint)
-            if resolved_mint == USDC_MINT:
-                continue
-            if mint in target_portfolio.token_balances:
-                weight = Decimal(str(target_portfolio.token_balances[mint].weight))
-                # 置換されたトークンの重みを合算 (例: USDTの重みをUSDCに合算)
-                if resolved_mint in adjusted_target:
-                    adjusted_target[resolved_mint] += weight
-                else:
-                    adjusted_target[resolved_mint] = weight
+
+        # まず全ての重みを集計
+        for token in all_tokens:
+            resolved_token = resolved_map[token]
+            if token in target_portfolio.token_balances:
+                weight = get_weight(token)
+                adjusted_target[resolved_token] = (
+                    adjusted_target.get(resolved_token, Decimal(0)) + weight
+                )
                 total_adjusted_weight += weight
 
-        # USDCのウェイトを残りの割合に設定
-        usdc_weight = Decimal(1) - total_adjusted_weight
-        if USDC_MINT in target_portfolio.token_balances:
-            adjusted_target[USDC_MINT] = usdc_weight
+        # 重みを正規化して合計を1にする
+        if total_adjusted_weight > 0:
+            for token in adjusted_target:
+                adjusted_target[token] = adjusted_target[token] / total_adjusted_weight
+            total_adjusted_weight = Decimal(1)
 
-        # 現在のポートフォリオの重みを計算
+        # --- 現在のポートフォリオの重み計算 ---
         current_weights: Dict[str, Decimal] = {}
-        for mint in all_tokens:
-            resolved_mint = self.resolve_address(mint)
-            current = current_portfolio.token_balances.get(mint)
+        for token in all_tokens:
+            resolved_token = resolved_map[token]
+            current = current_portfolio.token_balances.get(token)
             if current:
-                # 置換されたトークンの重みを合算 (例: USDTの重みをUSDCに合算)
-                current_weight = (
-                    Decimal(str(current.usd_value)) / current_total
+                cw = (
+                    (Decimal(str(current.usd_value)) / current_total)
                     if current_total > 0
                     else Decimal(0)
                 )
-                if resolved_mint in current_weights:
-                    current_weights[resolved_mint] += current_weight
-                else:
-                    current_weights[resolved_mint] = current_weight
+                current_weights[resolved_token] = (
+                    current_weights.get(resolved_token, Decimal(0)) + cw
+                )
 
-        # トレードを生成
-        for mint in all_tokens:
-            resolved_mint = self.resolve_address(mint)
-            if resolved_mint == USDC_MINT:
+        # --- トークンごとのトレード生成 ---
+        for token in all_tokens:
+            resolved_token = resolved_map[token]
+            if resolved_token == USDC_MINT:
                 continue
-            # Get token price from cache
-            price = prices.get(resolved_mint, Decimal(0))
-            current = current_portfolio.token_balances.get(mint)
-            target = target_portfolio.token_balances.get(mint)
+
+            price = prices.get(resolved_token, Decimal(0))
+            current = current_portfolio.token_balances.get(token)
+            target = target_portfolio.token_balances.get(token)
             symbol = (
                 current.symbol
                 if current
-                else target.symbol if target else mint[:8] + "..."
+                else target.symbol if target else token[:8] + "..."
             )
 
-            # 現在と目標の重みを取得
-            current_weight = current_weights.get(resolved_mint, Decimal(0))
-            target_weight = adjusted_target.get(resolved_mint, Decimal(0))
+            cw = current_weights.get(resolved_token, Decimal(0))
+            tw = adjusted_target.get(resolved_token, Decimal(0))
+            weight_diff = abs(tw - cw)
 
-            # 重みの差を計算
-            weight_diff = abs(target_weight - current_weight)
-
-            # 最小重み閾値チェック
-            if target_weight < self.risk_config.min_weight_threshold:
+            # 目標の重みが閾値未満の場合は売却トレードのみ（保有中の場合）
+            if tw < self.risk_config.min_weight_threshold:
                 if (
-                    current_weight > 0
+                    current
+                    and cw > 0
                     and current.usd_value > self.risk_config.min_trade_size_usd
                 ):
-                    # 保有していて、目標が最小閾値未満なら売却（USDCへのスワップ）
                     sell_trades.append(
                         SwapTrade(
                             type="swap",
                             from_symbol=symbol,
-                            from_mint=resolved_mint,  # 置換後のアドレスを使用
+                            from_mint=resolved_token,
                             from_amount=current.amount,
                             from_decimals=current.decimals,
                             to_symbol="USDC",
-                            to_mint=USDC_MINT,  # 直接USDC_MINTを使用
-                            to_amount=current.usd_value,  # USDCは1:1
+                            to_mint=USDC_MINT,
+                            to_amount=current.usd_value,  # USDCは1:1換算
                             to_decimals=6,
                             usd_value=current.usd_value,
                         )
                     )
                 continue
 
-            # 許容誤差内なら無視
+            # 許容誤差内の場合はスキップ
             if weight_diff <= self.risk_config.weight_tolerance:
                 logger.debug(
-                    f"Skipping {symbol} {mint}: weight difference {weight_diff:.3%} within tolerance"
+                    f"Skipping {symbol} {token}: weight difference {weight_diff:.3%} within tolerance"
                 )
                 continue
 
-            # トレード価値を計算（現在の総資産価値に基づいて）
-            trade_value = Decimal(0)
-            if target_weight > current_weight:
+            # 売り・買いの判断
+            if tw > cw:
                 # 買い注文：USDCからのスワップ
-                trade_value = current_total * (target_weight - current_weight)
+                trade_value = current_total * (tw - cw)
                 batch_amount = trade_value / price if price > 0 else Decimal(0)
-
-                # トークン情報が取得できない場合はスキップ
-                if not current and not target:
+                if not (current or target):
                     logger.warning(
                         f"Skipping buy trade for {symbol}: No token information available"
                     )
                     continue
 
-                # decimalsはcurrentかtargetから取得
-                token_decimals = (current and current.decimals) or (
-                    target and target.decimals
+                token_decimals = (
+                    current.decimals
+                    if current and current.decimals
+                    else target.decimals if target else None
                 )
-                if not token_decimals:
+                if token_decimals is None:
                     logger.warning(
                         f"Skipping buy trade for {symbol}: Could not determine token decimals"
                     )
@@ -190,11 +193,11 @@ class TradePlanner:
                     SwapTrade(
                         type="swap",
                         from_symbol="USDC",
-                        from_mint=USDC_MINT,  # 直接USDC_MINTを使用
-                        from_amount=trade_value,  # USDCは1:1
-                        from_decimals=6,  # USDCは常に6 decimals
+                        from_mint=USDC_MINT,
+                        from_amount=trade_value,  # USDCは1:1換算
+                        from_decimals=6,
                         to_symbol=symbol,
-                        to_mint=resolved_mint,  # 置換後のアドレスを使用
+                        to_mint=resolved_token,
                         to_amount=batch_amount,
                         to_decimals=token_decimals,
                         usd_value=trade_value,
@@ -202,17 +205,14 @@ class TradePlanner:
                 )
             else:
                 # 売り注文：USDCへのスワップ
-                trade_value = current_total * (current_weight - target_weight)
+                trade_value = current_total * (cw - tw)
                 batch_amount = trade_value / price if price > 0 else Decimal(0)
-
-                # トークン情報が取得できない場合はスキップ
                 if not current:
                     logger.warning(
                         f"Skipping sell trade for {symbol}: No token information available"
                     )
                     continue
 
-                # decimalsを取得
                 token_decimals = current.decimals
                 if not token_decimals:
                     logger.warning(
@@ -224,37 +224,34 @@ class TradePlanner:
                     SwapTrade(
                         type="swap",
                         from_symbol=symbol,
-                        from_mint=resolved_mint,  # 置換後のアドレスを使用
+                        from_mint=resolved_token,
                         from_amount=batch_amount,
                         from_decimals=token_decimals,
                         to_symbol="USDC",
-                        to_mint=USDC_MINT,  # 直接USDC_MINTを使用
-                        to_amount=trade_value,  # USDCは1:1
-                        to_decimals=6,  # USDCは常に6 decimals
+                        to_mint=USDC_MINT,
+                        to_amount=trade_value,  # USDCは1:1換算
+                        to_decimals=6,
                         usd_value=trade_value,
                     )
                 )
 
-        # 直接のトークン間取引を作成
+        # --- 売り・買いトレードのマッチング（直接取引の生成） ---
         direct_trades: List[SwapTrade] = []
         remaining_sells: List[SwapTrade] = []
         remaining_buys: List[SwapTrade] = []
 
-        # 売り取引と買い取引をマッチング
-        i = 0
-        while i < len(sell_trades):
-            sell = sell_trades[i]
-            matched = False
-            j = 0
-            while j < len(buy_trades):
-                buy = buy_trades[j]
-                if not buy.matched:
-                    # エイリアスを考慮してトークンを比較
-                    sell_to_mint = self.resolve_address(sell.to_mint)
-                    buy_from_mint = self.resolve_address(buy.from_mint)
+        # 買いトレードにフラグを追加（マッチ済みかどうか）
+        for bt in buy_trades:
+            bt.matched = False
 
-                    if sell_to_mint == buy_from_mint:
-                        # 取引サイズの小さい方を基準に取引を作成
+        for sell in sell_trades:
+            matched = False
+            for buy in buy_trades:
+                if not buy.matched:
+                    # エイリアス解決を再度実施（既に解決済みであるはず）
+                    if self.resolve_address(sell.to_mint) == self.resolve_address(
+                        buy.from_mint
+                    ):
                         match_value = min(sell.usd_value, buy.usd_value)
                         if match_value >= self.risk_config.min_trade_size_usd:
                             sell_ratio = match_value / sell.usd_value
@@ -266,65 +263,56 @@ class TradePlanner:
                                     from_symbol=sell.from_symbol,
                                     from_mint=self.resolve_address(sell.from_mint),
                                     from_amount=sell.from_amount * sell_ratio,
-                                    from_decimals=sell.from_decimals,  # 売り注文のdecimals
+                                    from_decimals=sell.from_decimals,
                                     to_symbol=buy.to_symbol,
                                     to_mint=self.resolve_address(buy.to_mint),
                                     to_amount=buy.to_amount * buy_ratio,
-                                    to_decimals=buy.to_decimals,  # 買い注文のdecimals
+                                    to_decimals=buy.to_decimals,
                                     usd_value=match_value,
                                 )
                             )
 
-                            # 残りの取引を更新
+                            # 残余分を個別トレードとして記録
                             if sell.usd_value > match_value:
-                                remaining_value = sell.usd_value - match_value
-                                remaining_ratio = remaining_value / sell.usd_value
                                 remaining_sells.append(
                                     SwapTrade(
                                         type="swap",
                                         from_symbol=sell.from_symbol,
                                         from_mint=self.resolve_address(sell.from_mint),
-                                        from_amount=sell.from_amount * remaining_ratio,
-                                        from_decimals=sell.from_decimals,  # 売り注文のdecimals
+                                        from_amount=sell.from_amount * (1 - sell_ratio),
+                                        from_decimals=sell.from_decimals,
                                         to_symbol=sell.to_symbol,
                                         to_mint=self.resolve_address(sell.to_mint),
-                                        to_amount=sell.to_amount * remaining_ratio,
-                                        to_decimals=6,  # USDCは常に6 decimals
-                                        usd_value=remaining_value,
+                                        to_amount=sell.to_amount * (1 - sell_ratio),
+                                        to_decimals=6,
+                                        usd_value=sell.usd_value - match_value,
                                     )
                                 )
-
                             if buy.usd_value > match_value:
-                                remaining_value = buy.usd_value - match_value
-                                remaining_ratio = remaining_value / buy.usd_value
                                 remaining_buys.append(
                                     SwapTrade(
                                         type="swap",
                                         from_symbol=buy.from_symbol,
                                         from_mint=self.resolve_address(buy.from_mint),
-                                        from_amount=buy.from_amount * remaining_ratio,
-                                        from_decimals=6,  # USDCは常に6 decimals
+                                        from_amount=buy.from_amount * (1 - buy_ratio),
+                                        from_decimals=6,
                                         to_symbol=buy.to_symbol,
                                         to_mint=self.resolve_address(buy.to_mint),
-                                        to_amount=buy.to_amount * remaining_ratio,
-                                        to_decimals=buy.to_decimals,  # 買い注文のdecimals
-                                        usd_value=remaining_value,
+                                        to_amount=buy.to_amount * (1 - buy_ratio),
+                                        to_decimals=buy.to_decimals,
+                                        usd_value=buy.usd_value - match_value,
                                     )
                                 )
-
                             buy.matched = True
                             matched = True
                             break
-                j += 1
-
             if not matched:
                 remaining_sells.append(sell)
-            i += 1
 
-        # マッチしなかった買い取引を追加
+        # マッチしていない買いトレードを収集
         remaining_buys.extend([buy for buy in buy_trades if not buy.matched])
 
-        # 全ての取引を結合して最適化
+        # --- 全トレードの結合と最終的な最適化 ---
         all_trades = direct_trades + remaining_sells + remaining_buys
         return self._optimize_trades(all_trades)
 

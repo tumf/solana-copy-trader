@@ -61,29 +61,26 @@ class RiskConfig(BaseModel):
                 "gas_buffer_sol": "0.1",
                 "weight_tolerance": "0.02",
                 "min_weight_threshold": "0.01",
+                "scaling_factor": "10",
             }
         },
     )
-
-    max_trade_size_usd: Decimal = Field(
-        description="1回の取引の最大サイズ（USD）", gt=0
-    )
-    min_trade_size_usd: Decimal = Field(
-        description="1回の取引の最小サイズ（USD）", gt=0
-    )
+    max_trade_size_usd: Decimal = Field(description="Maximum trade size in USD", gt=0)
+    min_trade_size_usd: Decimal = Field(description="Minimum trade size in USD", gt=0)
     max_slippage_bps: int = Field(
-        description="許容する最大スリッページ（ベーシスポイント）", ge=0, le=10000
+        description="Maximum allowed slippage in basis points", ge=0, le=10000
     )
     max_portfolio_allocation: Decimal = Field(
-        description="1つのトークンの最大配分比率", gt=0, le=1
+        description="Maximum allocation ratio for a single token", gt=0, le=1
     )
-    gas_buffer_sol: Decimal = Field(description="ガス代のバッファ（SOL）", gt=0)
+    gas_buffer_sol: Decimal = Field(description="Gas fee buffer in SOL", gt=0)
     weight_tolerance: Decimal = Field(
-        description="ポートフォリオの重みの許容誤差", gt=0, le=1
+        description="Portfolio weight tolerance", gt=0, le=1
     )
     min_weight_threshold: Decimal = Field(
-        description="ポートフォリオの最小重み閾値", gt=0, le=1
+        description="Minimum portfolio weight threshold", gt=0, le=1
     )
+    scaling_factor: Decimal = Field(description="Scaling factor", gt=0)
 
 
 class TokenAlias(BaseModel):

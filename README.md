@@ -1,66 +1,46 @@
 # Solana Copy Trader
 
-A Python-based Solana copy trading bot that analyzes portfolios of specified addresses and replicates their trading strategies.
+A tool to copy trade Solana wallets by monitoring their portfolio and replicating their trades.
 
 ## Features
 
-- Portfolio analysis of source addresses
-- Token price tracking using Jupiter API
-- Automated portfolio rebalancing
-- DEX trading via Jupiter (coming soon)
+- Monitor source wallet portfolio in real-time
+- Analyze portfolio changes and create trade plans
+- Execute trades automatically using Jupiter Exchange
+- Risk management and portfolio rebalancing
+- Configurable trade parameters and risk settings
 
 ## Setup
 
-1. Clone the repository
-2. Install dependencies:
-
-```bash
-uv add solders python-dotenv loguru requests
-```
-
-3. Copy `.env.example` to `.env` and configure your settings:
+1. Copy the example environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-4. Edit `.env` with your settings:
-- `RPC_URL`: Solana RPC endpoint
-- `WALLET_PRIVATE_KEY`: Your wallet's private key
-- `SOURCE_ADDRESSES`: Comma-separated list of addresses to copy
+2. Configure the required environment variables in `.env`:
 
-## Usage
-
-```python
-from solders.pubkey import Pubkey
-from src.copy_agent import CopyTradeAgent
-
-async def main():
-    agent = CopyTradeAgent(os.getenv("RPC_URL"))
-    
-    # Analyze source portfolios
-    source_addresses = [Pubkey.from_string(addr) for addr in os.getenv("SOURCE_ADDRESSES").split(",")]
-    source_portfolios = await agent.analyze_source_portfolios(source_addresses)
-    
-    # Get current portfolio
-    wallet = Pubkey.from_string(os.getenv("WALLET_ADDRESS"))
-    current_portfolio = await agent.get_wallet_portfolio(wallet)
-    
-    # Create target portfolio
-    target_portfolio = agent.create_target_portfolio(source_portfolios)
-    
-    # Create and execute trade plan
-    trades = await agent.create_trade_plan(current_portfolio, target_portfolio)
-    await agent.execute_trades(trades)
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+```
+RPC_URL=            # Your Solana RPC URL
+WALLET_PRIVATE_KEY= # Your wallet's private key
+SOURCE_ADDRESS=     # Address to copy trade
 ```
 
-## Development
+3. Run with Docker:
 
-- Format code: `make format`
-- Run linter: `make lint`
-- Run type checker: `make typecheck`
-- Run tests: `make test`
+```bash
+docker compose up --build
+```
+
+## Configuration
+
+See `.env.example` for all available configuration options:
+
+- Trade interval settings
+- Risk management parameters
+- Portfolio tolerance settings
+- API configurations
+
+## License
+
+MIT

@@ -2,7 +2,6 @@ import asyncio
 from decimal import Decimal
 from typing import Dict, List, Optional
 
-import aiohttp
 from solana.rpc.async_api import AsyncClient
 
 from dex.base import SwapResult
