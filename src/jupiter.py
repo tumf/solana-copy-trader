@@ -12,6 +12,7 @@ from solders.message import to_bytes_versioned  # type: ignore
 from solders.transaction import VersionedTransaction  # type: ignore
 
 from models import SwapResult
+from network.solana import RPC_URL
 
 # Jupiter API limits
 MAX_IDS_PER_REQUEST = 100
@@ -20,7 +21,7 @@ logger = logger.bind(name="jupiter")
 
 class JupiterClient:
     def __init__(self, rpc_url: Optional[str] = None):
-        self.rpc_url = rpc_url or "https://api.mainnet-beta.solana.com"
+        self.rpc_url = rpc_url or RPC_URL
         self.ws_url = self.rpc_url.replace("http", "ws")
         self.session = None
         self.price_url = "https://api.jup.ag/price/v2"
@@ -213,9 +214,6 @@ class JupiterClient:
 
             # Send signed transaction to Solana node
             session = await self.ensure_session()
-            url = self.rpc_url
-            if not url:
-                url = "https://api.mainnet-beta.solana.com"
 
             payload = {
                 "jsonrpc": "2.0",
@@ -231,7 +229,7 @@ class JupiterClient:
                 ],
             }
 
-            async with session.post(url, json=payload) as response:
+            async with session.post(self.rpc_url, json=payload) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(
@@ -308,7 +306,7 @@ class JupiterClient:
             session = await self.ensure_session()
             url = self.rpc_url
             if not url:
-                url = "https://api.mainnet-beta.solana.com"
+                url = RPC_URL
 
             payload = {
                 "jsonrpc": "2.0",

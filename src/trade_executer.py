@@ -9,7 +9,7 @@ from dex.base import SwapResult
 from jupiter import JupiterClient
 from logger import logger
 from models import RiskConfig, SwapTrade
-from network.solana import USDC_MINT
+from network.solana import RPC_URL, USDC_MINT
 
 logger = logger.bind(name="trade_executer")
 
@@ -177,9 +177,7 @@ class TradeExecuter:
 
 async def main():
     # Initialize trade executer with Solana mainnet RPC URL
-    trade_executer = TradeExecuter(
-        "https://api.mainnet-beta.solana.com", RiskConfig(max_slippage_bps=100)
-    )
+    trade_executer = TradeExecuter(RPC_URL, RiskConfig(max_slippage_bps=100))
     await trade_executer.initialize()
 
     # Example trades

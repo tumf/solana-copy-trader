@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from logger import logger
 from models import Token, TokenAlias
-from network.solana import TOKEN_PROGRAM_ID
+from network.solana import TOKEN_PROGRAM_ID, RPC_URL
 
 logger = logger.bind(name="token_resolver")
 
@@ -24,7 +24,7 @@ class TokenAccount:
 
 class TokenResolver:
     def __init__(self):
-        self.rpc_url = "https://api.mainnet-beta.solana.com"
+        self.rpc_url = RPC_URL
         self.session = None
         self.client = None
         self.token_db = {}

@@ -5,13 +5,15 @@ from typing import Dict, Optional
 import aiohttp
 from loguru import logger
 from solana.rpc.async_api import AsyncClient
-from solders.pubkey import Pubkey
+from solders.pubkey import Pubkey  # ignore: type
+
+from network.solana import RPC_URL as DEFAULT_RPC_URL
 
 
 class BirdEyeClient:
     BASE_URL = "https://public-api.birdeye.so"
     API_KEY = os.getenv("BIRDEYE_API_KEY", "")
-    RPC_URL = os.getenv("RPC_URL", "https://api.mainnet-beta.solana.com")
+    RPC_URL = os.getenv("RPC_URL", DEFAULT_RPC_URL)
 
     def __init__(self):
         if not self.API_KEY:

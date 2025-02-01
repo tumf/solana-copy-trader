@@ -11,7 +11,7 @@ from solders.pubkey import Pubkey  # type: ignore
 
 from logger import logger
 from models import TokenAlias, Trade
-from network.solana import TOKEN_ALIAS, USDC_MINT
+from network.solana import TOKEN_ALIAS, USDC_MINT, RPC_URL as DEFAULT_RPC_URL
 from portfolio import Portfolio, PortfolioAnalyzer, TokenBalance
 from token_price_resolver import TokenPriceResolver
 from token_resolver import TokenResolver
@@ -266,7 +266,7 @@ async def main():
             weight_tolerance=Decimal("0.02"),
             min_weight_threshold=Decimal("0.01"),
         )
-        rpc_url = os.getenv("RPC_URL", "https://api.mainnet-beta.solana.com")
+        rpc_url = os.getenv("RPC_URL", DEFAULT_RPC_URL)
         # Initialize agent with Solana mainnet RPC URL
         agent = CopyTradeAgent(
             rpc_url=rpc_url,
