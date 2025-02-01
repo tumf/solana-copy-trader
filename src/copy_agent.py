@@ -21,10 +21,11 @@ from trade_planner import RiskConfig, TradePlanner
 logger = logger.bind(name="copy_agent")
 
 
+
 class CopyTradeAgent:
     def __init__(
         self,
-        rpc_url: str,
+        rpc_url: str = DEFAULT_RPC_URL,
         token_aliases: Optional[List[TokenAlias]] = None,
         risk_config: Optional[RiskConfig] = None,
     ):

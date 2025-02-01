@@ -15,11 +15,23 @@ logger = logger.bind(name="trade_executer")
 
 
 class TradeExecuter:
-    def __init__(self, rpc_url: str, risk_config: RiskConfig):
+    def __init__(
+        self,
+        rpc_url: str = RPC_URL,
+        risk_config: Optional[RiskConfig] = None,
+    ):
         self.rpc_url = rpc_url
-        self.risk_config = risk_config
+        self.risk_config = risk_config or RiskConfig(
+            max_trade_size_usd=Decimal("1000"),
+            min_trade_size_usd=Decimal("10"),
+            max_slippage_bps=100,
+            max_portfolio_allocation=Decimal("0.25"),
+            gas_buffer_sol=Decimal("0.1"),
+            weight_tolerance=Decimal("0.02"),
+            min_weight_threshold=Decimal("0.01"),
+        )
         self.client = AsyncClient(rpc_url)
-        self.max_slippage_bps = risk_config.max_slippage_bps
+        self.max_slippage_bps = self.risk_config.max_slippage_bps
         self.jupiter_client = JupiterClient(rpc_url=self.rpc_url)
         self.wallet_address: Optional[str] = None
         self.wallet_private_key: Optional[str] = None
@@ -58,21 +70,12 @@ class TradeExecuter:
             raise ValueError(error_msg)
 
         # Get quote from Jupiter API
-        params = {
-            "inputMint": trade.from_mint,
-            "outputMint": trade.to_mint,
-            "amount": trade.from_amount_lamports,
-            "slippageBps": self.max_slippage_bps,
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                self.jupiter_client.quote_url + "/quote", params=params
-            ) as response:
-                if response.status != 200:
-                    error_msg = f"Failed to get quote: {response.status} {await response.text()}"
-                    logger.error(error_msg)
-                    raise ValueError(error_msg)
-                return await response.json()
+        return await self.jupiter_client.get_quote(
+            input_mint=trade.from_mint,
+            output_mint=trade.to_mint,
+            amount=trade.from_amount_lamports,
+            slippage_bps=self.max_slippage_bps,
+        )
 
     async def execute_swap_with_retry(self, trade: SwapTrade) -> SwapResult:
         try:
@@ -177,7 +180,7 @@ class TradeExecuter:
 
 async def main():
     # Initialize trade executer with Solana mainnet RPC URL
-    trade_executer = TradeExecuter(RPC_URL, RiskConfig(max_slippage_bps=100))
+    trade_executer = TradeExecuter(RPC_URL)
     await trade_executer.initialize()
 
     # Example trades
@@ -198,7 +201,9 @@ async def main():
     # Note: You need to set these variables before running this example
     test_wallet_address = "your_wallet_address"
     test_private_key = "your_private_key"
-    await trade_executer.execute_trades(trades, test_wallet_address, test_private_key)
+    trade_executer.set_wallet_address(test_wallet_address)
+    trade_executer.set_wallet_private_key(test_private_key)
+    await trade_executer.execute_trades(trades)
     await trade_executer.close()
 
 

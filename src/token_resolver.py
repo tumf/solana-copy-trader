@@ -23,8 +23,8 @@ class TokenAccount:
 
 
 class TokenResolver:
-    def __init__(self):
-        self.rpc_url = RPC_URL
+    def __init__(self, rpc_url: str = RPC_URL):
+        self.rpc_url = rpc_url
         self.session = None
         self.client = None
         self.token_db = {}

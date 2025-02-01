@@ -3,12 +3,13 @@ from typing import Dict, List
 
 from jupiter import JupiterClient
 from logger import logger
+from network.solana import RPC_URL
 
 logger = logger.bind(name="token_price_resolver")
 
 
 class TokenPriceResolver:
-    def __init__(self, rpc_url: str):
+    def __init__(self, rpc_url: str = RPC_URL):
         self.rpc_url = rpc_url
         self.jupiter_client = JupiterClient(rpc_url=rpc_url)
 
