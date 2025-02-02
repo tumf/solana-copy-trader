@@ -147,26 +147,21 @@ class CopyTradeAgent:
         current_time = Decimal(str(time.time()))
 
         # Calculate time weights
-        time_weights = {}
+        portfolio_weights = {}
         total_weight = Decimal(0)
         for portfolio in source_portfolios.values():
-            time_diff = max(
-                Decimal(0), current_time - Decimal(str(portfolio.timestamp))
-            )
-            weight = Decimal(1) / (
-                Decimal(1) + time_diff / Decimal(3600)
-            )  # 1時間で重みが半分に
-            time_weights[id(portfolio)] = weight
+            weight = Decimal(1)
+            portfolio_weights[id(portfolio)] = weight
             total_weight += weight
 
         # Normalize weights
-        for portfolio_id in time_weights:
-            time_weights[portfolio_id] /= total_weight
+        for portfolio_id in portfolio_weights:
+            portfolio_weights[portfolio_id] /= total_weight
 
         # Calculate weighted average portfolio
         total_value = Decimal(0)
         for portfolio in source_portfolios.values():
-            weight = time_weights[id(portfolio)]
+            weight = portfolio_weights[id(portfolio)]
             for mint, balance in portfolio.token_balances.items():
                 if mint not in token_balances:
                     token_balances[mint] = TokenBalance(
