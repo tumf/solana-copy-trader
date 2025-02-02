@@ -8,14 +8,14 @@ class MeteoraAPI:
         self.base_url = "https://api.meteora.ag/v1"
 
     def get_quote(self, params: dict) -> dict:
-        # テスト用のモックデータを返す
+        # Return mock data for testing
         return {
-            "outAmount": str(int(params["amount"]) * 1.008),  # 0.8%のプレミアム
+            "outAmount": str(int(params["amount"]) * 1.008),  # 0.8% premium
             "priceImpact": "0.12",
         }
 
     def get_swap_transaction(self, data: dict) -> dict:
-        # テスト用のモックデータを返す
+        # Return mock transaction data for testing
         return {
             "transaction": "test_transaction",
         }
@@ -56,5 +56,5 @@ class MeteoraSwap(DEX):
     async def execute_swap(
         self, quote: SwapQuote, wallet_address: str, wallet_private_key: str
     ) -> SwapResult:
-        # テスト用に成功を返す
+        # Return success result for testing
         return SwapResult(success=True, tx_signature="test_signature")

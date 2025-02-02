@@ -167,7 +167,7 @@ class PortfolioAnalyzer:
                 metadata = await self._get_token_metadata(account.mint)
                 symbol = metadata.get("symbol", account.mint[:8] + "...")
 
-                # 同じトークンの場合は合算する
+                # Aggregate amounts if token already exists in portfolio
                 if account.mint in token_balances:
                     token_balances[account.mint].amount += account.amount
                     token_balances[account.mint].usd_value += usd_value

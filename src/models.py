@@ -23,7 +23,7 @@ class Token(Base):
 
 
 class SwapTrade(BaseModel):
-    """スワップ取引"""
+    """Swap Trade"""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
@@ -48,7 +48,7 @@ Trade = SwapTrade
 
 
 class RiskConfig(BaseModel):
-    """取引のリスク設定を管理するモデル"""
+    """Risk configuration model for trading"""
 
     model_config = ConfigDict(
         validate_assignment=True,

@@ -15,19 +15,19 @@ class RaydiumDEX(DEX):
     async def get_quote(
         self, input_mint: str, output_mint: str, amount: int, slippage_bps: int = 100
     ) -> SwapQuote:
-        # テスト用のモックデータを返す
+        # Return mock data for testing
         return SwapQuote(
             input_mint=input_mint,
             output_mint=output_mint,
             input_amount=amount,
-            expected_output_amount=int(amount * 1.007),  # 0.7%のプレミアム
+            expected_output_amount=int(amount * 1.007),  # 0.7% of premium
             price_impact_pct=Decimal("0.13"),
-            minimum_output_amount=int(amount * 0.987),  # 1.3%のスリッページ
+            minimum_output_amount=int(amount * 0.987),  # 1.3% of slippage
             dex_name=self.name,
         )
 
     async def execute_swap(
         self, quote: SwapQuote, wallet_address: str, wallet_private_key: str
     ) -> SwapResult:
-        # テスト用に成功を返す
+        # Return success result for testing
         return SwapResult(success=True, tx_signature="test_signature")

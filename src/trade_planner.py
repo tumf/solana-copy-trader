@@ -309,24 +309,17 @@ class TradePlanner:
             if not matched:
                 remaining_sells.append(sell)
 
-        # マッチしていない買いトレードを収集
+        # Collect unmatched buy trades
         remaining_buys.extend([buy for buy in buy_trades if not buy.matched])
 
-        # --- 全トレードの結合と最終的な最適化 ---
+        # --- Combine and optimize all trades ---
         all_trades = direct_trades + remaining_sells + remaining_buys
-        return self._optimize_trades(all_trades)
 
-    def _optimize_trades(self, trades: List[Trade]) -> List[Trade]:
-        """取引を最適化して合成する"""
-        if not trades:
-            return []
-
-        # トークンペアごとに取引を集約
+        # Aggregate trades by token pair
         pair_trades: Dict[str, SwapTrade] = {}
-        intermediate_trades: Dict[str, List[SwapTrade]] = {}
 
-        # 最初のパスで取引を集約
-        for trade in trades:
+        # First pass to aggregate trades
+        for trade in all_trades:
             # Validate addresses before processing
             from_mint = self.resolve_address(trade.from_mint)
             to_mint = self.resolve_address(trade.to_mint)
@@ -357,37 +350,48 @@ class TradePlanner:
             pair_trades[pair_key].to_amount += trade.to_amount
             pair_trades[pair_key].usd_value += trade.usd_value
 
-            # 中間トークンを使用する取引を記録
+            # Record trades using intermediate tokens
             if to_mint == USDC_MINT:
-                if from_mint not in intermediate_trades:
-                    intermediate_trades[from_mint] = []
-                intermediate_trades[from_mint].append(pair_trades[pair_key])
-            elif from_mint == USDC_MINT:
-                if to_mint not in intermediate_trades:
-                    intermediate_trades[to_mint] = []
-                intermediate_trades[to_mint].append(pair_trades[pair_key])
+                if from_mint not in pair_trades:
+                    pair_trades[from_mint] = SwapTrade(
+                        type="swap",
+                        from_symbol=trade.from_symbol,
+                        from_mint=from_mint,
+                        from_amount=Decimal(0),
+                        from_decimals=trade.from_decimals,
+                        to_symbol=trade.to_symbol,
+                        to_mint=to_mint,
+                        to_amount=Decimal(0),
+                        to_decimals=trade.to_decimals,
+                        usd_value=Decimal(0),
+                    )
+                pair_trades[from_mint].from_amount += trade.from_amount
+                pair_trades[from_mint].to_amount += trade.to_amount
+                pair_trades[from_mint].usd_value += trade.usd_value
 
-        # 中間トークンを使用する取引を直接取引に変換
+        # Convert trades using intermediate tokens to direct trades
         optimized_pairs: Dict[str, SwapTrade] = {}
-        for from_mint, from_trades in intermediate_trades.items():
+
+        # Find trade pairs using the same intermediate token
+        for from_mint, from_trades in pair_trades.items():
             # Skip invalid addresses
             if len(from_mint) > 44:
                 continue
 
-            for to_mint, to_trades in intermediate_trades.items():
+            for to_mint, to_trades in pair_trades.items():
                 # Skip invalid addresses
                 if len(to_mint) > 44:
                     continue
 
                 if from_mint != to_mint:
-                    # 同じ中間トークンを使用する取引ペアを見つける
+                    # Find trade pairs using the same intermediate token
                     for from_trade in from_trades:
                         for to_trade in to_trades:
                             if (
                                 from_trade.to_mint == USDC_MINT
                                 and to_trade.from_mint == USDC_MINT
                             ):
-                                # 取引サイズの小さい方を基準に直接取引を作成
+                                # Create direct trade based on the smaller trade size
                                 match_value = min(
                                     from_trade.usd_value, to_trade.usd_value
                                 )
@@ -419,7 +423,7 @@ class TradePlanner:
                                     )
                                     direct_trade.usd_value += match_value
 
-                                    # 元の取引から使用した分を減らす
+                                    # Reduce used portion from original trades
                                     from_trade.from_amount -= (
                                         from_trade.from_amount * from_ratio
                                     )
@@ -434,7 +438,7 @@ class TradePlanner:
                                     to_trade.to_amount -= to_trade.to_amount * to_ratio
                                     to_trade.usd_value -= match_value
 
-        # 残りの取引を追加
+        # Add remaining trades
         for trade in pair_trades.values():
             if trade.usd_value >= self.risk_config.min_trade_size_usd:
                 # Skip trades with invalid addresses
@@ -449,7 +453,7 @@ class TradePlanner:
                     optimized_pairs[pair_key].to_amount += trade.to_amount
                     optimized_pairs[pair_key].usd_value += trade.usd_value
 
-        # 最適化された取引を最大取引サイズで分割
+        # Optimize and combine trades
         optimized_trades: List[Trade] = []
         for trade in optimized_pairs.values():
             if trade.usd_value < self.risk_config.min_trade_size_usd:
