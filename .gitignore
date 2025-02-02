@@ -12,3 +12,4 @@ data/
 .coverage
 wallet.key
 logs/
+.cursorrules

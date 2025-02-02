@@ -5,19 +5,11 @@ import argparse
 from decimal import Decimal
 
 from dotenv import load_dotenv
-from loguru import logger
-
+from logger import logger
 from copy_agent import CopyTradeAgent
 from models import RiskConfig
 
-# Configure logger
-logger.remove()
-logger.add(
-    sys.stderr,
-    format=("<level>{message}</level>"),
-    level="INFO",
-    colorize=True,
-)
+logger = logger.bind(name="main")
 
 
 def load_risk_config() -> RiskConfig:

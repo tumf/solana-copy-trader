@@ -1,0 +1,13 @@
+---
+description: Python package and project manager using uv and make
+globs: 
+---
+- use uv add/remove to manage dependencies
+- use `uv run` to run the script under the current python version
+- use `make check` to run all the checks
+- use `make format` to format the code, run when lint failed
+- use `make lint` to run the linter, run after updating code
+- use `make typecheck` to run the type checker
+- use `make test` to run the tests
+- use `make clean` to clean the project
+- use `make install` to install packages (uv sync --all-extras)

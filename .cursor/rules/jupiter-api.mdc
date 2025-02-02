@@ -1,6 +1,6 @@
 ---
 description: Juipiter API
-globs: 
+globs: src/jupiter.py
 ---
 ## Jupiter API endpoints
 
