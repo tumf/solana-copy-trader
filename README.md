@@ -1,5 +1,7 @@
 # Solana Copy Trader
 
+[🏠️ Solana Copy Trader Official Site 👉️](https://solana-copy-trader.tumf.jp/)
+
 A tool to copy trade Solana wallets by monitoring their portfolio and replicating their trades.
 
 ## Features
