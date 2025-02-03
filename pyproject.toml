@@ -90,26 +90,26 @@ omit = [
 ]
 
 [tool.mypy]
-# 基本設定
+# Basic settings
 python_version = "3.12"
-warn_return_any = false  # Any型の戻り値を許可
+warn_return_any = false  # Allow Any type return values
 warn_unused_configs = true
 disallow_untyped_defs = false
 check_untyped_defs = false
 
-# サードパーティライブラリの型チェックを無視
+# Ignore type checking for third-party libraries
 ignore_missing_imports = true
 
-# 重要度の低い警告を無視
+# Ignore low priority warnings
 disable_error_code = [
-    "import-untyped",  # 型情報のないモジュールのインポートを無視
-    "annotation-unchecked",  # 型アノテーションのない関数のチェックを無視
-    "no-any-return",  # Any型の戻り値を無視
+    "import-untyped",  # Ignore imports from modules without type information
+    "annotation-unchecked",  # Ignore functions without type annotations
+    "no-any-return",  # Ignore Any type returns
 ]
 
-# 特定のモジュールを型チェックから除外
+# Exclude specific modules from type checking
 exclude = [
-    "tests/",  # テストコードは型チェックから除外
-    "migrations/",  # マイグレーションファイルは型チェックから除外
+    "tests/",  # Exclude test code from type checking
+    "migrations/",  # Exclude migration files from type checking
 ]
 
